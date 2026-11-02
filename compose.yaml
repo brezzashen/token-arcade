@@ -1,0 +1,26 @@
+# Local viewer. Mount only the agent homes you use; every mount is read-only.
+# HOST_HOME defaults to your home directory so container paths match the host paths in transcripts.
+services:
+  token-arcade:
+    build: .
+    image: token-arcade:local
+    container_name: token-arcade
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8047:8047"
+    environment:
+      HOME: ${HOME}
+      TOKEN_ACCOUNTS: ${TOKEN_ACCOUNTS:-cc1,co1}
+      TOKEN_QUOTA_CACHE: /state/last-quota.json
+    volumes:
+      - ${HOME}/.claude:${HOME}/.claude:ro
+      - ${HOME}/.codex:${HOME}/.codex:ro
+      # Optional extra profiles and providers; create the directory first or remove the line.
+      # - ${HOME}/.claude-profiles:${HOME}/.claude-profiles:ro
+      # - ${HOME}/.codex-profiles:${HOME}/.codex-profiles:ro
+      # - ${HOME}/.grok:${HOME}/.grok:ro
+      - token-state:/state
+      - token-speed-state:${HOME}/.local/share/token-dashboard
+volumes:
+  token-state:
+  token-speed-state:

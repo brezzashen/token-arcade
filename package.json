@@ -1,0 +1,13 @@
+{
+  "name": "token-arcade",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build web/app.ts --outdir web/dist --target browser && bun build speed-worker.ts speed-probe.ts host-agent.ts --outdir dist --target node",
+    "test": "node --disable-warning=ExperimentalWarning --test bounded-collector.test.ts antigravity.test.ts antigravity-sources.test.ts content-speed.test.ts host-telemetry.test.ts windows-telemetry.test.ts task-watch.test.ts quota-cache.test.ts speed-supervisor.test.ts web/pricing.test.ts vendor/remaining-range/*.test.ts",
+    "start": "node server.ts"
+  },
+  "dependencies": {
+    "js-tiktoken": "1.0.21"
+  }
+}
