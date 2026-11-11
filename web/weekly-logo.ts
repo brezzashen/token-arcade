@@ -20,7 +20,8 @@ export function weeklyLogo(value: number | null | undefined, account: AccountRep
   const billed = remaining === null && account.billing?.costUsd != null ? usd(account.billing.costUsd) : null;
   const accessibility = remaining === null ? `role="img" aria-label="${providerName(account.provider)} ${billed ? `本月真实账单 ${billed}` : account.billing ? '按量计费无周额度' : '本周剩余额度未知'}"`
     : `role="progressbar" aria-label="${providerName(account.provider)} 本周剩余额度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${remaining}" aria-valuetext="剩余 ${percent(remaining)}"`;
-  return `<div class="weekly-logo" data-provider="${account.provider}" ${accessibility}>
+  const state = remaining === null ? '' : remaining <= 0 ? ' exhausted' : remaining < 15 ? ' warning' : '';
+  return `<div class="weekly-logo${state}" data-provider="${account.provider}" ${accessibility}>
     <svg viewBox="0 0 ${plateSize} ${plateSize}" aria-hidden="true" shape-rendering="crispEdges">
       <defs>
         <pattern id="${id}-empty" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="3" height="3" class="pixel-empty"/></pattern>

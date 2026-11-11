@@ -130,13 +130,15 @@ export async function readAntigravityReport(home = homedir(), now = Date.now(),
     if (seenConversations.has(id)) continue;
     const dbPath = join(conversations, file);
     try {
-      if ((await stat(dbPath)).mtimeMs < scanSince) continue;
+      const wal = await stat(dbPath + '-wal').catch(() => null);
+      if (Math.max((await stat(dbPath)).mtimeMs, wal?.mtimeMs ?? 0) < scanSince) continue;
       const { meta: stepMeta } = readStepMetadata(dbPath);
       for (const meta of stepMeta.values()) {
         if (!Number.isFinite(meta.at) || meta.at < scanSince || meta.at > now || !matchesAlias(alias, meta.provider)) continue;
         if (meta.in !== undefined && meta.out !== undefined) {
           const cached = meta.cached ?? 0;
-          const thinking = meta.think !== undefined && meta.think + (meta.resp ?? 0) === meta.out ? meta.think : null;
+          const thinking = meta.think !== undefined && meta.think + (meta.resp ?? 0) === meta.out ? meta.think
+            : meta.think === undefined && meta.resp === meta.out ? 0 : null;
           records.push({ at: meta.at, input: meta.in + cached, cached, output: meta.out, model: meta.model, thinking, provider: meta.provider });
         }
       }
@@ -179,9 +181,12 @@ export async function readAntigravityReport(home = homedir(), now = Date.now(),
     if (!Number.isFinite(reset) || typeof minutes !== 'number' || win.modelScope) return win;
     const cycleStart = reset - minutes * 60_000;
     const cycleUsage = aggregate(cycleStart, now);
+    const cycleModels = [...new Set(records.filter(row => row.at >= cycleStart && row.at <= now)
+      .flatMap(row => row.model === null ? [] : [row.model]))];
     const used = win.usedPercent;
     const perPoint = cycleUsage.totalTokens !== null && typeof used === 'number' && used > 0 ? cycleUsage.totalTokens / used : null;
     return { ...win, cycleTokens: { ...cycleUsage,
+      byModel: cycleModels.map(model => ({ model, ...aggregate(cycleStart, now, model) })),
       tokensPerQuotaPercentagePoint: perPoint,
       projectedTokensPerFullWindow: perPoint === null ? null : perPoint * 100 } };
   });

@@ -70,30 +70,63 @@ test('ag2 isolates Vertex AI records and computes real USD billing while ag1 kee
   try {
     const logs = join(home, '.gemini/antigravity-cli/brain/session/.system_generated/logs');
     await mkdir(logs, { recursive: true });
-    await writeFile(join(logs, 'transcript.jsonl'), JSON.stringify(step({ model: 'gemini-4-argon', input_tokens: 1_000_000, cache_read_tokens: 5_000_000, output_tokens: 100_000 })) + '\n');
+    await writeFile(join(logs, 'transcript.jsonl'), [
+      JSON.stringify(step({ step_index: 1, model: 'gemini-4-argon', input_tokens: 1_000_000, cache_read_tokens: 5_000_000, output_tokens: 100_000 })),
+      JSON.stringify(step({ step_index: 2, model: 'gemini-4-carbon', input_tokens: 500_000, cache_read_tokens: 2_500_000, output_tokens: 50_000 })),
+    ].join('\n') + '\n');
     const convDir = join(home, '.gemini/antigravity-cli/conversations');
     await mkdir(convDir, { recursive: true });
     const { DatabaseSync } = await import('node:sqlite');
     const db = new DatabaseSync(join(convDir, 'session.db'));
     db.exec('CREATE TABLE gen_metadata (data BLOB); CREATE TABLE steps (idx INTEGER, step_type INTEGER, status INTEGER, metadata BLOB);');
-    // field 9 (ModelUsage) -> field 1 (enum=1419), field 3 (out=100000), field 6 (provider=3 GOOGLE_VERTEX)
+    // field 9 (ModelUsage) -> field 1 (enum), field 3 (out), field 6 (provider=3 GOOGLE_VERTEX)
     const varint = (v: number) => { const b: number[] = []; do { const p = v % 128; v = Math.floor(v / 128); b.push(p + (v ? 128 : 0)); } while (v); return Buffer.from(b); };
     const int = (f: number, v: number) => Buffer.concat([varint(f * 8), varint(v)]);
     const msg = (f: number, v: Buffer) => Buffer.concat([varint(f * 8 + 2), varint(v.length), v]);
     db.prepare('INSERT INTO gen_metadata VALUES (?)').run(msg(1, Buffer.concat([int(3, 1419), msg(19, Buffer.from('gemini-4-argon'))])));
+    db.prepare('INSERT INTO gen_metadata VALUES (?)').run(msg(1, Buffer.concat([int(3, 1437), msg(21, Buffer.from('Gemini 4 Carbon (Medium)'))])));
     db.prepare('INSERT INTO steps VALUES (?, ?, ?, ?)').run(1, 15, 3, msg(9, Buffer.concat([int(1, 1419), int(3, 100_000), int(6, 3)])));
+    db.prepare('INSERT INTO steps VALUES (?, ?, ?, ?)').run(2, 15, 3, msg(9, Buffer.concat([int(1, 1437), int(3, 50_000), int(6, 3)])));
     db.close();
     const subReport = await readAntigravityReport(home, now, { alias: 'ag1' });
     assert.equal(subReport.tokens.samples[0].totalTokens, null);
     const vertexReport = await readAntigravityReport(home, now, { alias: 'ag2' });
-    assert.equal(vertexReport.tokens.samples[0].totalTokens, 6_100_000);
-    // 1M uncached * $4 + 5M cached * $0.2 + 0.1M output * $20 = 4 + 1 + 2 = $7.00
-    assert.ok(vertexReport.billing && Math.abs(vertexReport.billing.costUsd! - 7) < 1e-6);
+    assert.equal(vertexReport.tokens.samples[0].totalTokens, 9_150_000);
+    // Argon ($7.00) + Carbon (0.5M * $4 + 2.5M * $0.2 + 0.05M * $20 = $3.50) = $10.50
+    assert.ok(vertexReport.billing && Math.abs(vertexReport.billing.costUsd! - 10.5) < 1e-6);
     const projected = projectReport('ag2', vertexReport);
     assert.equal(projected.label, 'ag2 · vertex');
     assert.equal(projected.plan, 'Vertex AI Pay-as-you-go');
     const html = overview([projected]) + pricing([projected]);
-    assert.match(html, /\$7\.00/);
+    assert.match(html, /\$10\.50/);
     assert.match(html, /本月真实账单/);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+
+test('ag1 cycle windows carry per-model usage for Carbon and Argon quota estimation', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'token-antigravity-cycle-'));
+  try {
+    const logs = join(home, '.gemini/antigravity-cli/brain/session/.system_generated/logs');
+    const convDir = join(home, '.gemini/antigravity-cli/conversations');
+    await mkdir(logs, { recursive: true });
+    await mkdir(convDir, { recursive: true });
+    await writeFile(join(logs, 'transcript.jsonl'), JSON.stringify(step({ input_tokens: 200_000, cache_read_tokens: 800_000, output_tokens: 100_000 })) + '\n');
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(join(convDir, 'session.db'));
+    db.exec('CREATE TABLE gen_metadata (data BLOB); CREATE TABLE steps (idx INTEGER, step_type INTEGER, status INTEGER, metadata BLOB);');
+    const varint = (v: number) => { const b: number[] = []; do { const p = v % 128; v = Math.floor(v / 128); b.push(p + (v ? 128 : 0)); } while (v); return Buffer.from(b); };
+    const int = (f: number, v: number) => Buffer.concat([varint(f * 8), varint(v)]);
+    const msg = (f: number, v: Buffer) => Buffer.concat([varint(f * 8 + 2), varint(v.length), v]);
+    db.prepare('INSERT INTO gen_metadata VALUES (?)').run(msg(1, Buffer.concat([int(3, 1437), msg(19, Buffer.from('gemini-4-carbon'))])));
+    db.prepare('INSERT INTO steps VALUES (?, ?, ?, ?)').run(1, 15, 3, msg(9, Buffer.concat([int(1, 1437), int(3, 100_000), int(6, 24), int(9, 40_000), int(10, 60_000)])));
+    db.close();
+    const report = await readAntigravityReport(home, now, { alias: 'ag1', quotaReader: async () => ({
+      status: 'observed', plan: 'Google AI Ultra', windows: [{ window: 'gemini-5h', windowMinutes: 300,
+        remainingPercent: 90, usedPercent: 10, resetsAt: new Date(now + 3600_000).toISOString(), modelScope: null, surfaceScope: null }] }) });
+    const projected = projectReport('ag1', report);
+    assert.equal(projected.windows[0].cycle?.models.length, 1);
+    assert.equal(projected.windows[0].cycle?.models[0].model, 'gemini-4-carbon');
+    assert.equal(projected.windows[0].cycle?.models[0].totalTokens, 1_100_000);
+    assert.equal(projected.windows[0].cycle?.models[0].reasoningOutputTokens, 40_000);
   } finally { await rm(home, { recursive: true, force: true }); }
 });

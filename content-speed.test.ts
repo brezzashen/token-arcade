@@ -150,10 +150,10 @@ test('speed cards follow each account in registry order and show the model it us
   const at = (account: string, model: string, sampledAt: number, tokensPerSecond: number) => ({ ...base, account, model,
     tokensPerSecond, status: 'sampled', sampledAt: new Date(sampledAt).toISOString() });
   const cards = (samples: any[], accounts?: string[], intervals?: any[]) => [...outputSpeed({ samples, intervals, nextFallbackAt: null, stale: false, accounts }, 5000)
-    .matchAll(/<span>([^<]+) · 正在用<\/span>(?:<span[^>]*>[^<]*<\/span>)?<\/div>\s*<h3>([^<]+)<\/h3>/g)].map(match => `${match[1]}:${match[2]}`);
+    .matchAll(/<span>([^<]+) · (?:正在用|最近用过)<\/span>(?:<span[^>]*>[^<]*<\/span>)?<\/div>\s*<h3>([^<]+)<\/h3>/g)].map(match => `${match[1]}:${match[2]}`);
   const samples = [at('co1', 'gpt-6.1-sol', 4500, 1), at('cc1', 'claude-haiku', 4000, 9), at('cc1', 'claude-opus-5-5', 3000, 50),
     at('cc3', 'claude-opus-5-5', 1000, 9)];
-  assert.deepEqual(cards(samples), ['cc1:claude-haiku', 'cc2:近 1 小时无对话', 'cc3:claude-opus-5-5', 'cc4:近 1 小时无对话', 'cc5:近 1 小时无对话', 'co1:gpt-6.1-sol',
+  assert.deepEqual(cards(samples), ['cc1:claude-haiku', 'cc2:近 1 小时无对话', 'cc3:claude-opus-5-5', 'cc4:近 1 小时无对话', 'cc5:近 1 小时无对话', 'cc6:近 1 小时无对话', 'cc7:近 1 小时无对话', 'co1:gpt-6.1-sol',
     'co2:近 1 小时无对话', 'ag1:近 1 小时无对话', 'ag2:近 1 小时无对话']);
   assert.deepEqual(cards([...samples].reverse()), cards(samples));
   assert.deepEqual(cards(samples, ['cc3', 'co1', 'grok', 'ag1']), ['cc3:claude-opus-5-5', 'co1:gpt-6.1-sol', 'ag1:近 1 小时无对话', 'cc1:claude-haiku']);
@@ -162,6 +162,8 @@ test('speed cards follow each account in registry order and show the model it us
   assert.deepEqual(cards(samples, ['cc3', 'co1', 'grok', 'ag1'], historical), ['cc3:claude-opus-5-5', 'co1:gpt-6.1-sol', 'ag1:gemini-4-argon', 'cc1:claude-haiku']);
   const fallbackHtml = outputSpeed({ samples, intervals: historical, nextFallbackAt: null, stale: false }, 5000);
   assert.ok(fallbackHtml.includes('最近 3 小时均值'));
+  // A card that falls back to an older window names its model as recently used, not as in use now.
+  assert.ok(fallbackHtml.includes('ag1 · 最近用过') && fallbackHtml.includes('cc1 · 正在用'));
   assert.ok(fallbackHtml.includes('42.0'));
   const html = outputSpeed({ samples, nextFallbackAt: null, stale: false }, 5000);
   assert.ok(html.includes('<div class="speed-others"><span>近 1 小时其他模型</span><div><span>claude-opus-5-5</span><b>≈50.0 token/s</b></div></div>'));

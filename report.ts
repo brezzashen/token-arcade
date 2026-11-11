@@ -1,6 +1,6 @@
 /** Public report projection for range.ts; only aggregate usage enters the browser. */
 import { geminiSubscriptionPlan, geminiVertexPlan } from './subscription.ts';
-export const accountAliases = ['cc1', 'cc2', 'cc3', 'cc4', 'cc5', 'co1', 'co2', 'grok', 'ag1', 'ag2'] as const;
+export const accountAliases = ['cc1', 'cc2', 'cc3', 'cc4', 'cc5', 'cc6', 'cc7', 'co1', 'co2', 'grok', 'ag1', 'ag2'] as const;
 export type Alias = typeof accountAliases[number];
 /** Accounts read when TOKEN_ACCOUNTS is unset: the default Claude Code and Codex logins. */
 export const defaultAccounts = 'cc1,co1';
@@ -37,14 +37,19 @@ function usage(row: RecordValue = {}) {
 export function projectReport(alias: Alias | 'gm' | 'gm2', report: RecordValue) {
   const normalized: Alias = alias === 'gm' ? 'ag1' : alias === 'gm2' ? 'ag2' : alias;
   const rawWindows = report.windows ?? report.quota?.windows ?? (report.quota?.periodType ? [report.quota] : []);
+  const observedAt = text(report.quota?.observedAt ?? report.quota?.capturedAt ?? report.capturedAt);
   const windows = rows(rawWindows).map((row: RecordValue) => {
     const remaining = finite(row.remainingPercent);
+    const shareUsed = finite(row.weeklyShare?.usedPercent);
+    const shareCap = finite(row.weeklyShare?.allowancePercent);
     return { name: text(row.window ?? row.periodType), minutes: finite(row.windowMinutes),
       model: text(row.modelScope?.label), surface: text(row.surfaceScope?.label ?? row.surfaceScope),
       scoped: row.modelScope != null || row.surfaceScope != null,
       usedPercent: finite(row.usedPercent) ?? (remaining === null ? null : 100 - remaining),
       remainingPercent: remaining, resetsAt: text(row.resetsAt),
-      cycle: row.cycleTokens ? { ...usage(row.cycleTokens),
+      observedAt: text(row.observedAt) ?? observedAt,
+      weeklyShare: shareUsed !== null || shareCap !== null ? { usedPercent: shareUsed, allowancePercent: shareCap } : null,
+      cycle: row.cycleTokens ? { ...usage(row.cycleTokens), models: rows(row.cycleTokens.byModel).map(usage),
         tokensPerQuotaPercentagePoint: finite(row.cycleTokens.tokensPerQuotaPercentagePoint),
         projectedTokensPerFullWindow: finite(row.cycleTokens.projectedTokensPerFullWindow) } : null };
   });

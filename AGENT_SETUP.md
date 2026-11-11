@@ -19,7 +19,7 @@ if a step fails or a choice is unclear.
    - Grok: ~/.grok. Antigravity: ~/.gemini/antigravity-cli.
    Show me the list and ask which ones to watch.
 5. Build the settings:
-   - TOKEN_ACCOUNTS: aliases to show. cc1 = ~/.claude, cc2..cc5 = extra Claude profiles,
+   - TOKEN_ACCOUNTS: aliases to show. cc1 = ~/.claude, cc2..cc7 = extra Claude profiles,
      co1 = ~/.codex, co2 = one extra Codex profile, grok, ag1 (Antigravity subscription), ag2 (Vertex AI).
    - TOKEN_CLAUDE_PROFILES / TOKEN_CODEX_PROFILES: profile directory names, in alias order,
      only if the alphabetical default order is not what I want.

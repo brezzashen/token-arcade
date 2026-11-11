@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { defaultAccounts, parseAccounts, projectReport, type AccountReport, type Alias } from './report.ts';
-import { cacheable, carryForward, loadQuotaCache, saveQuotaCache } from './quota-cache.ts';
+import { cacheable, carryForward, loadQuotaCache, mergeScopedWindows, saveQuotaCache } from './quota-cache.ts';
 import { superviseSpeed } from './speed-supervisor.ts';
 import { emptyHostSnapshot, startHostMonitor, type HostSnapshot } from './host-telemetry.ts';
 import { collectOutput, stopCollector } from './bounded-collector.ts';
@@ -17,6 +17,8 @@ const root = fileURLToPath(new URL('.', import.meta.url));
 const script = process.env.TOKEN_RANGE_SCRIPT ?? resolve(root, 'vendor/remaining-range/range.ts');
 const aliases = parseAccounts(process.env.TOKEN_ACCOUNTS ?? defaultAccounts);
 const intervalMs = 60_000;
+const scopedRefreshMs = 5 * 60_000;
+const lastServerAttempt = new Map<Alias, number>();
 const port = Number(process.env.TOKEN_PORT ?? 8047);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid TOKEN_PORT.');
 let running = false;
@@ -39,12 +41,21 @@ const stopHost = startHostMonitor(reading => { host = reading; });
 const remotes = startRemoteHosts(parseRemoteHosts(process.env.TOKEN_REMOTE_HOSTS),
   message => process.stderr.write(`${new Date().toISOString()} ${message}\n`));
 
-async function collectAccount(alias: Alias): Promise<AccountReport> {
+function needsServerQuota(alias: Alias, cached: AccountReport | undefined, now = Date.now()) {
+  if (!alias.startsWith('cc') || now - (lastServerAttempt.get(alias) ?? 0) < scopedRefreshMs) return false;
+  const fable = cached?.windows.find(row => row.scoped && row.model?.toLowerCase().includes('fable'));
+  const observed = fable?.observedAt ? Date.parse(fable.observedAt) : Number.NaN;
+  return !Number.isFinite(observed) || now - observed >= scopedRefreshMs;
+}
+
+async function collectAccount(alias: Alias, preferServer = false): Promise<AccountReport> {
   const env = { ...process.env };
   for (const key of ['CODEX_THREAD_ID', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY']) delete env[key];
+  if (preferServer) lastServerAttempt.set(alias, Date.now());
   try {
     const stdout = await collectOutput(process.execPath,
-      ['--disable-warning=ExperimentalWarning', resolve(root, 'collect.ts'), '--range-script', script, '--account', alias],
+      ['--disable-warning=ExperimentalWarning', resolve(root, 'collect.ts'), '--range-script', script, '--account', alias,
+        ...(preferServer ? ['--prefer-server'] : [])],
       { env, onStart: child => children.add(child), onDone: child => children.delete(child) });
     return projectReport(alias, JSON.parse(stdout));
   } catch {
@@ -55,11 +66,13 @@ async function collectAccount(alias: Alias): Promise<AccountReport> {
 async function refresh() {
   if (running) return;
   running = true;
-  startedAt = new Date().toISOString();
-  nextRefreshAt = Date.now() + intervalMs;
-  const fresh = await Promise.all(aliases.map(collectAccount));
+  const now = Date.now();
+  startedAt = new Date(now).toISOString();
+  nextRefreshAt = now + intervalMs;
+  const raw = await Promise.all(aliases.map(alias => collectAccount(alias, needsServerQuota(alias, quotaCache.get(alias), now))));
+  const fresh = raw.map(report => mergeScopedWindows(report, quotaCache.get(report.alias), now));
   for (const report of fresh) if (cacheable(report)) quotaCache.set(report.alias, report);
-  accounts = fresh.map(report => carryForward(report, quotaCache.get(report.alias)));
+  accounts = fresh.map(report => carryForward(report, quotaCache.get(report.alias), now));
   await saveQuotaCache(cachePath, quotaCache).catch(() => { /* The in-memory cache still serves this process. */ });
   completedAt = new Date().toISOString();
   generation++;

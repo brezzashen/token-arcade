@@ -14,7 +14,7 @@ const at = Date.parse('2026-10-05T08:00:00Z');
 
 function fixture() {
   const home = mkdtempSync(join(tmpdir(), 'accounts-'));
-  for (const dir of ['.claude', '.claude-profiles/p1', '.claude-profiles/p2', '.claude-profiles/p3', '.claude-profiles/p4', '.claude-profiles/stray', '.codex', '.codex-profiles/work', '.grok', '.config/cg4/claude-home']) {
+  for (const dir of ['.claude', '.claude-profiles/p1', '.claude-profiles/p2', '.claude-profiles/p3', '.claude-profiles/p4', '.claude-profiles/p5', '.claude-profiles/p6', '.claude-profiles/stray', '.codex', '.codex-profiles/work', '.grok', '.config/cg4/claude-home']) {
     mkdirSync(join(home, dir), { recursive: true });
   }
   writeFileSync(join(home, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'uuid-admin',
@@ -40,11 +40,11 @@ test('aliases map to the registered profiles, including Grok, while both preserv
   const f = fixture();
   try {
     const registry = registeredAccounts(f.home);
-    assert.deepEqual(registry.map(a => a.alias), ['cc1', 'cc2', 'cc3', 'cc4', 'cc5', 'co1', 'co2', 'grok', 'gm']);
+    assert.deepEqual(registry.map(a => a.alias), ['cc1', 'cc2', 'cc3', 'cc4', 'cc5', 'cc6', 'cc7', 'co1', 'co2', 'grok', 'gm']);
     assert.deepEqual(registry.map(a => a.home), [join(f.home, '.claude'), join(f.home, '.claude-profiles/p1'),
-      join(f.home, '.claude-profiles/p2'), join(f.home, '.claude-profiles/p3'), join(f.home, '.claude-profiles/p4'), join(f.home, '.codex'), join(f.home, '.codex-profiles/work'), join(f.home, '.grok'), join(f.home, '.config/cg4/claude-home')]);
-    assert.deepEqual(registry.map(a => a.switchCommand), ['claude /login', 'CLAUDE_CONFIG_DIR=~/.claude-profiles/p1 claude /login', 'CLAUDE_CONFIG_DIR=~/.claude-profiles/p2 claude /login', 'CLAUDE_CONFIG_DIR=~/.claude-profiles/p3 claude /login', 'CLAUDE_CONFIG_DIR=~/.claude-profiles/p4 claude /login', 'codex login', 'CODEX_HOME=~/.codex-profiles/work codex login', 'grok login', 'cg4']);
-    assert.deepEqual(selectAccounts({ agent: 'both', home: f.home }).map(a => a.alias), ['cc1', 'cc2', 'cc3', 'cc4', 'cc5', 'co1', 'co2']);
+      join(f.home, '.claude-profiles/p2'), join(f.home, '.claude-profiles/p3'), join(f.home, '.claude-profiles/p4'), join(f.home, '.claude-profiles/p5'), join(f.home, '.claude-profiles/p6'), join(f.home, '.codex'), join(f.home, '.codex-profiles/work'), join(f.home, '.grok'), join(f.home, '.config/cg4/claude-home')]);
+    assert.deepEqual(registry.map(a => a.switchCommand), ['claude /login', 'CLAUDE_CONFIG_DIR=~/.claude-profiles/p1 claude /login', 'CLAUDE_CONFIG_DIR=~/.claude-profiles/p2 claude /login', 'CLAUDE_CONFIG_DIR=~/.claude-profiles/p3 claude /login', 'CLAUDE_CONFIG_DIR=~/.claude-profiles/p4 claude /login', 'CLAUDE_CONFIG_DIR=~/.claude-profiles/p5 claude /login', 'CLAUDE_CONFIG_DIR=~/.claude-profiles/p6 claude /login', 'codex login', 'CODEX_HOME=~/.codex-profiles/work codex login', 'grok login', 'cg4']);
+    assert.deepEqual(selectAccounts({ agent: 'both', home: f.home }).map(a => a.alias), ['cc1', 'cc2', 'cc3', 'cc4', 'cc5', 'cc6', 'cc7', 'co1', 'co2']);
     assert.deepEqual(selectAccounts({ agent: 'grok', home: f.home }).map(a => a.alias), ['grok']);
     assert.deepEqual(selectAccounts({ agent: 'gemini', home: f.home }).map(a => a.alias), ['gm']);
     assert.deepEqual(selectAccounts({ agent: 'codex', home: f.home }).map(a => a.alias), ['co1', 'co2']);
@@ -96,16 +96,16 @@ test('each account is read with its own login, and one failure never discards th
         assert.equal(dir, join(f.home, '.grok'));
         return { ...normalizeGrokQuota(grokBilling, at), identityHint: 'gr***@example.com', accountFingerprint: 'grok-fingerprint' };
       }) as never });
-    assert.deepEqual(seen.map(s => s.ignoreEnv), [true, true, true, true, true]);
-    assert.deepEqual(accounts.map(a => a.status), ['observed', 'observed', 'unavailable', 'observed', 'observed', 'observed', 'observed', 'observed', 'unavailable']);
-    assert.deepEqual(accounts.map(a => a.weekly?.remainingPercent ?? null), [53, 98, null, 98, 98, 2, 2, 97, null]);
-    assert.equal(accounts[8].plan, 'pay-as-you-go');
-    assert.ok(accounts[8].fingerprint && !accounts[8].fingerprint.includes('cg4-user-id'));
+    assert.deepEqual(seen.map(s => s.ignoreEnv), [true, true, true, true, true, true, true]);
+    assert.deepEqual(accounts.map(a => a.status), ['observed', 'observed', 'unavailable', 'observed', 'observed', 'observed', 'observed', 'observed', 'observed', 'observed', 'unavailable']);
+    assert.deepEqual(accounts.map(a => a.weekly?.remainingPercent ?? null), [53, 98, null, 98, 98, 98, 98, 2, 2, 97, null]);
+    assert.equal(accounts[10].plan, 'pay-as-you-go');
+    assert.ok(accounts[10].fingerprint && !accounts[10].fingerprint.includes('cg4-user-id'));
     assert.equal(accounts[0].identityHint, 'ad***@example.com');
     assert.equal(accounts[1].identityHint, null);
     assert.equal(accounts[0].session!.remainingPercent, 60);
     assert.deepEqual(accounts[0].scoped.map(w => w.modelScope?.label), ['Fable']);
-    assert.equal(accounts[5].session, null);
+    assert.equal(accounts[7].session, null);
     assert.match(accounts[2].hint!, /CLAUDE_CONFIG_DIR=~\/\.claude-profiles\/p2/);
     assert.ok(!JSON.stringify(accounts).includes('admin@example.com'));
     const missing = await readAccountQuota({ ...refs[0], home: join(f.home, 'absent') } as AccountRef, { home: f.home });
@@ -125,9 +125,9 @@ test('the accounts CLI plans without quota RPC, selects by alias and writes noth
     const plan = run('--dry-run');
     assert.equal(plan.status, 0, plan.stderr);
     const parsed = JSON.parse(plan.stdout);
-    assert.deepEqual(parsed.accounts.map((a: AccountRef) => a.alias), ['cc1', 'cc2', 'cc3', 'cc4', 'cc5', 'co1', 'co2', 'grok', 'gm']);
+    assert.deepEqual(parsed.accounts.map((a: AccountRef) => a.alias), ['cc1', 'cc2', 'cc3', 'cc4', 'cc5', 'cc6', 'cc7', 'co1', 'co2', 'grok', 'gm']);
     assert.deepEqual(JSON.parse(run('--dry-run', '--agent', 'both').stdout).accounts.map((a: AccountRef) => a.alias),
-      ['cc1', 'cc2', 'cc3', 'cc4', 'cc5', 'co1', 'co2']);
+      ['cc1', 'cc2', 'cc3', 'cc4', 'cc5', 'cc6', 'cc7', 'co1', 'co2']);
     assert.deepEqual(JSON.parse(run('--dry-run', '--agent', 'gemini').stdout).accounts.map((a: AccountRef) => a.alias), ['gm']);
     const scoped = JSON.parse(run('--dry-run', '--only', 'co1', '--agent', 'codex').stdout);
     assert.deepEqual(scoped.accounts.map((a: AccountRef) => a.alias), ['co1']);

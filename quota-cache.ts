@@ -8,15 +8,27 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { AccountReport, Alias } from './report.ts';
 
-const live = (window: AccountReport['windows'][number], now: number) => {
+const futureReset = (window: AccountReport['windows'][number], now: number) => {
   const reset = window.resetsAt === null ? Number.NaN : Date.parse(window.resetsAt);
   return Number.isFinite(reset) && reset > now;
 };
 
+const live = (window: AccountReport['windows'][number], now: number, hasLiveSibling = false) =>
+  futureReset(window, now) || (hasLiveSibling && window.resetsAt === null && window.usedPercent === 0 && window.remainingPercent === 100);
+
+/** Statusline readings omit server-scoped model windows (Fable); carry live scoped windows from the last server read. */
+export function mergeScopedWindows(fresh: AccountReport, cached: AccountReport | undefined, now = Date.now()): AccountReport {
+  if (!fresh.windows.length || !cached || fresh.windows.some(window => window.scoped)) return fresh;
+  const siblingLive = cached.windows.some(window => futureReset(window, now));
+  const carried = cached.windows.filter(window => window.scoped && live(window, now, siblingLive));
+  return carried.length ? { ...fresh, windows: [...fresh.windows, ...carried] } : fresh;
+}
+
 /** A fresh reading with windows wins; otherwise the cached windows that have not reset yet. */
 export function carryForward(fresh: AccountReport, cached: AccountReport | undefined, now = Date.now()): AccountReport {
   if (fresh.windows.length || !fresh.issue || !cached) return fresh;
-  const windows = cached.windows.filter(window => live(window, now));
+  const siblingLive = cached.windows.some(window => futureReset(window, now));
+  const windows = cached.windows.filter(window => live(window, now, siblingLive));
   if (!windows.length) return fresh;
   const telemetry = fresh.samples.length ? {} : { samples: cached.samples, models: cached.models, cache: cached.cache,
     forecast: cached.forecast, forecasts: cached.forecasts, telemetryIssue: cached.telemetryIssue };

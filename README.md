@@ -40,7 +40,7 @@ Accounts use fixed aliases. Unset `TOKEN_ACCOUNTS` reads `cc1,co1`.
 | Alias | Source |
 | --- | --- |
 | `cc1` | Claude Code default login (`~/.claude`) |
-| `cc2`–`cc5` | Extra Claude Code profiles: the names in `TOKEN_CLAUDE_PROFILES`, else the first four sub-directories of `~/.claude-profiles` in name order (each used as `CLAUDE_CONFIG_DIR`) |
+| `cc2`–`cc7` | Extra Claude Code profiles: the names in `TOKEN_CLAUDE_PROFILES`, else the first six sub-directories of `~/.claude-profiles` in name order (each used as `CLAUDE_CONFIG_DIR`) |
 | `co1` | Codex default login (`~/.codex`) |
 | `co2` | One extra Codex profile: `TOKEN_CODEX_PROFILES`, else the first sub-directory of `~/.codex-profiles` (used as `CODEX_HOME`) |
 | `grok` | Grok CLI login (`~/.grok`) |
@@ -49,7 +49,7 @@ Accounts use fixed aliases. Unset `TOKEN_ACCOUNTS` reads `cc1,co1`.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `TOKEN_ACCOUNTS` | `cc1,co1` | Comma-separated aliases to show |
-| `TOKEN_CLAUDE_PROFILES` | auto | Profile directory names under `~/.claude-profiles` for `cc2`–`cc5` |
+| `TOKEN_CLAUDE_PROFILES` | auto | Profile directory names under `~/.claude-profiles` for `cc2`–`cc7` |
 | `TOKEN_CODEX_PROFILES` | auto | Profile directory name under `~/.codex-profiles` for `co2` |
 | `TOKEN_HOST` / `TOKEN_PORT` | `127.0.0.1` / `8047` | Listen address and port |
 | `TOKEN_RANGE_SCRIPT` | `vendor/remaining-range/range.ts` | Quota reader script |
@@ -90,6 +90,26 @@ The agent exits when SSH closes, so nothing stays resident on the remote and no 
 Unknown token counters remain null. Quota failures preserve available local tokens.
 Cached input and reasoning output are subsets; totals come from the owning script.
 Provider percentages are separate. Local records are not account billing.
+
+## Speed collector liveness
+
+`task-watch.ts` stamps `progressAt` and `stage` each time the poll loop advances (discover, stat, read, checkpoint).
+The worker heartbeat republishes readings only while the loop moved within 30 s (`pollLive`), so `/api/speed` turns
+stale instead of repeating old numbers. After 120 s without progress (`pollStalled`) the worker writes a
+`{ type: "stalled", stage }` line and exits; the supervisor logs `Speed collector poll loop stalled at <stage>` to
+`process-error.log` and restarts it from the checkpoint. A card that falls back to an older window labels its model
+`最近用过`, not `正在用`.
+
+## Per-model quota estimate
+
+The reader adds `cycleTokens.byModel` (one token window per model, with long-request counters at that model's own price
+tier: 272K for GPT, 200K for Gemini, 100K for Claude Haiku 5.5). `web/quota-models.ts` renders `按模型估算额度` under the `周期内` view:
+each model's API-equivalent cost and share of the used quota, and how many tokens the same window would hold on one
+model alone. Quota burn = API-equivalent cost × a per-model burn factor. `calibrate` measures the factor from the
+accounts' own windows: windows at least 95% on the dominant model give the dollars behind one point per window length,
+and windows with at least a 30% share of another model give that model's factor (median of at least two windows; a
+model without one uses a same-family factor or 1×, labelled `未校准`). Providers publish no formula, so these are
+estimates. A model-scoped server window (the separate Fable weekly limit) is selectable as its own cycle.
 
 ## How readings are collected
 
@@ -139,7 +159,10 @@ Codex and Grok on dark surfaces, including low-quota cards.
 `web/provider.ts` shares Claude, GPT / Codex and Grok marks across the legend,
 account tables and selectors. Vendored SVG provenance and the MIT license are in
 `web/logos/`; the server allows only the three named SVG image routes.
-`web/overview.ts` renders every account's exact account-wide 300-minute limit first.
+`web/overview.ts` renders every account's account-wide 300-minute limit, weekly limit,
+Claude's independent `Fable 5` weekly model limit (`weekly_scoped` with `weekly_scoped_shares`,
+refreshed from the server endpoint every 5 minutes even when statusline is active and merged
+across statusline polls), and local 24-hour token totals in one compact table.
 `web/weekly-logo.ts` renders weekly quota as square pixel plates derived from the
 vendored Claude, OpenAI and Grok marks. Provider colors fill from the bottom, so
 used quota grays the plate from the top down; 100% colors the full plate and 0% leaves it gray. The exact percentage appears below
@@ -147,8 +170,8 @@ the logo. Missing readings remain unavailable; Grok keeps a gray pixel logo with
 an em dash and no numeric progress value when its reading is unavailable.
 `web/logos/pixels.ts` freezes the
 pixel geometry; no browser image loading or canvas work is needed for these plates.
-Selected-account details follow as section 02; all-account current-cycle token
-consumption follows as section 03. Model and surface limits stay out of these tables.
+Selected-account details follow as section 02 (including the `周额度 · Fable 5` card and cycle tokens);
+all-account current-cycle token consumption (including model-scoped cycles with local records) follows as section 03.
 Missing 5-hour limits are explicit. Missing cycles fall back to labeled rolling 24-hour records.
 Per-percentage-point and full-window estimates come from the skill's cycle fields;
 they describe the observed local workload, never an official token allowance.
@@ -170,9 +193,10 @@ elapsed time since reset. Missing local usage stays unavailable, including Grok.
 
 ## Official price reference
 
-`web/pricing.ts` records official standard API prices checked on 2026-10-07:
+`web/pricing.ts` records official standard API prices checked on 2026-11-11:
 [Claude](https://platform.claude.com/docs/en/about-claude/pricing),
-[OpenAI](https://developers.openai.com/api/docs/pricing), and
+[OpenAI](https://developers.openai.com/api/docs/pricing),
+[Gemini](https://ai.google.dev/gemini-api/docs/pricing), and
 [Grok](https://docs.x.ai/developers/pricing). Each model row links its source.
 Exact model aliases and dated suffixes resolve only to verified rate entries.
 Unknown models and missing counters remain unavailable rather than inheriting a rate.
@@ -193,7 +217,7 @@ Validate the price calculator with
 
 ## Output-speed collection
 
-The first screen has one card per local account (`cc1`, `cc2`, `cc3`, `cc4`, `cc5`, `co1`, `co2` in registry order, from the
+The first screen has one card per local account (`cc1`, `cc2`, `cc3`, `cc4`, `cc5`, `cc6`, `cc7`, `co1`, `co2` in registry order, from the
 worker's `accounts` list; Grok has no local records). Each card follows the model that account answered with most
 recently and shows its reasoning and visible-output speeds as separate large values, followed by the combined
 rolling one-hour mean and requested mode. Codex cards compare Ultrafast, Fast and Standard separately and mark

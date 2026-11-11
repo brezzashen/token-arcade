@@ -6,14 +6,17 @@ export const percent = (value: number | null) => value === null ? '—' : `${Num
 export const usd = (value: number | null | undefined) => value === null || value === undefined || !Number.isFinite(value)
   ? '—' : `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 export const tokens = (value: number | null) => value === null ? '—' : value === 0 ? '0' : value >= 1e8
-  ? `${Number((value / 1e8).toPrecision(3))} 亿` : `${Number((value / 1e6).toPrecision(3))} 百万`;
+  ? `${Number((value / 1e8).toPrecision(3))} 亿` : value >= 1e4
+  ? `${Number((value / 1e6).toPrecision(3))} 百万` : Math.round(value).toLocaleString('en-US');
 export const time = (value: string | null) => value ? new Date(value).toLocaleString('zh-CN', {
   timeZone: 'Asia/Singapore', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
   second: '2-digit', hour12: false }) : '—';
 export const scopes: Record<string, string> = { last_hour: '最近 1 小时', last_three_hours: '最近 3 小时', last_five_hours: '最近 5 小时', last_24_hours: '最近 24 小时' };
 export const coverageBadge = (status: string | null) => status === 'partial' ? '<span class="coverage">部分记录</span>' : '';
+export const quotaModelLabel = (model: string | null) => model && /^fable$/i.test(model) ? 'Fable 5' : model;
 export function quotaName(row: AccountReport['windows'][number]) {
   const duration = row.minutes === 10080 ? '周额度' : row.minutes === 300 ? '5 小时额度'
     : row.name?.includes('monthly') || row.name === 'monthly' ? '月额度' : row.minutes ? `${row.minutes / 60} 小时额度` : '额度';
-  return `${duration}${row.model ? ` · ${row.model}` : ''}${row.surface ? ` · ${row.surface}` : ''}`;
+  const model = quotaModelLabel(row.model);
+  return `${duration}${model ? ` · ${model}` : ''}${row.surface ? ` · ${row.surface}` : ''}`;
 }

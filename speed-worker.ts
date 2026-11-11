@@ -8,7 +8,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { Tiktoken } from 'js-tiktoken/lite';
 import ranks from 'js-tiktoken/ranks/o200k_base';
 import { TaskWatch } from './task-watch.ts';
-import { acceptSample, freshTask, normalizeMode, sampleKey } from './speed-policy.ts';
+import { acceptSample, freshTask, normalizeMode, pollLive, pollStalled, sampleKey } from './speed-policy.ts';
 import { DialogSpeed } from './dialog-speed.ts';
 import { readAntigravitySpeed } from './antigravity-speed.ts';
 import { createHash } from 'node:crypto';
@@ -53,8 +53,10 @@ function publish(sample: any) {
   samples.set(key, sample);
   emitState();
 }
+let lastEmittedAt = 0;
 function emitState() {
   const now = Date.now(), intervals = dialogs.intervals(now), taskSamples = intervals[0].samples;
+  lastEmittedAt = now;
   process.stdout.write(JSON.stringify({ samples: [...taskSamples, ...[...samples.values()].filter(sample =>
     !taskSamples.some(task => sampleKey(task) === sampleKey(sample) && freshTask(task, Date.now())))],
     nextFallbackAt: fallbackEnabled ? nextFallbackAt : null, fallbackEnabled, windowMs: hour, intervals, accounts: aliases.split(','),
@@ -100,16 +102,40 @@ const readGeminiSpeed = async () => {
     if (selected.has(sample.account)) dialogs.accept(sample);
   }
 };
-const heartbeat = setInterval(() => process.stdout.write(JSON.stringify({ type: 'progress', observedAt: new Date().toISOString() }) + '\n'), 5000);
+const emitIntervalMs = 10_000;
+// A poll step whose promise never settles leaves the loop silent while timers keep firing. Republishing old readings
+// then would hide it, so a quiet loop stops publishing after 30 s and the worker exits after 120 s for a supervised restart.
+let lastTickAt = Date.now(), step = 'startup';
+const quietMs = () => Date.now() - Math.max(lastTickAt, watcher.progressAt);
+const heartbeat = setInterval(() => {
+  const observedAt = new Date().toISOString();
+  if (pollStalled(quietMs())) {
+    setTimeout(() => process.exit(1), 2000).unref();
+    process.stdout.write(JSON.stringify({ type: 'stalled', stage: `${step}/${watcher.stage}`, observedAt }) + '\n', () => process.exit(1));
+  } else if (lastEmittedAt > 0 && Date.now() - lastEmittedAt >= emitIntervalMs && pollLive(quietMs())) emitState();
+  else process.stdout.write(JSON.stringify({ type: 'progress', observedAt }) + '\n');
+}, 5000);
+await watcher.restore();
+if (dialogs.readings().length) emitState();
 await watcher.discover(); await watcher.poll(); await readGeminiSpeed();
 emitState();
 let ticks = 0;
-// Recomputing every speed window costs ~90% of this worker, so publish every fifth tick (10 s), inside /api/speed staleness (20 s).
-const emitEveryTicks = 5;
+// Recomputing every speed window costs ~90% of this worker, so publish every 10 s, inside /api/speed staleness (20 s).
 const timer = setInterval(async () => {
   if (polling) return;
   polling = true;
-  try { if (++ticks % 8 === 0) await watcher.discover(); await watcher.poll(); await readGeminiSpeed(); if (ticks % emitEveryTicks === 0) emitState(); void fallback(); }
+  try {
+    step = 'discover';
+    if (++ticks % 8 === 0) await watcher.discover();
+    step = 'poll';
+    await watcher.poll();
+    step = 'antigravity';
+    await readGeminiSpeed();
+    step = 'emit';
+    if (Date.now() - lastEmittedAt >= emitIntervalMs) emitState();
+    void fallback();
+    step = 'idle'; lastTickAt = Date.now();
+  }
   finally { polling = false; }
 }, 2000);
 for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, () => {

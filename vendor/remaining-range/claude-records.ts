@@ -22,16 +22,23 @@ export function readClaudeAccountId(configDir: string, home = homedir()): string
   if (resolve(configDir) === resolve(home, '.claude')) candidates.push(join(home, '.claude.json'));
   for (const path of candidates) {
     if (!existsSync(path)) continue;
-    const state = JSON.parse(readFileSync(path, 'utf8'));
-    const account = state.oauthAccount;
+    const account = JSON.parse(readFileSync(path, 'utf8')).oauthAccount;
     if (typeof account?.accountUuid === 'string' && account.accountUuid) {
       return `${account.accountUuid}:${account.organizationUuid ?? ''}`;
     }
-    if (typeof state.userID === 'string' && state.userID) {
-      return `claude-user:${state.userID}`;
-    }
   }
   throw new Error('No local Claude Code account identity available.');
+}
+
+/**
+ * The cg4 home (Claude Code on Gemini via a local proxy) has no OAuth login, so its stable identity is the install
+ * `userID`. Kept apart from readClaudeAccountId so a logged-out Claude profile still reports no identity.
+ */
+export function readGeminiProfileId(configDir: string): string {
+  const path = join(configDir, '.claude.json');
+  const userId = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')).userID : null;
+  if (typeof userId === 'string' && userId) return `claude-user:${userId}`;
+  throw new Error('No local cg4 profile identity available.');
 }
 
 /** Claude Code names a project directory after its cwd with every non-alphanumeric character replaced by `-`. */
@@ -206,6 +213,7 @@ export async function readClaudeRecords(configDir: string, since: number, until:
   const dirs = project ? [projectSlug(project)].filter(d => existsSync(join(root, d))) : readdirSync(root);
   const files: string[] = [];
   for (const dir of dirs) {
+    if (dir.includes('antigravity-orca-bridge')) continue;
     const path = join(root, dir);
     if (!statSync(path).isDirectory()) continue;
     for (const name of readdirSync(path)) {

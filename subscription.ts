@@ -3,6 +3,7 @@ export const geminiSubscriptionPlan = 'Google AI Ultra';
 export const geminiVertexPlan = 'Vertex AI Pay-as-you-go';
 export const geminiPlan = geminiSubscriptionPlan;
 export const vertexRates: Record<string, { input: number; cached: number; output: number }> = {
+  'gemini-4-carbon': { input: 4, cached: 0.2, output: 20 },
   'gemini-4-argon': { input: 4, cached: 0.2, output: 20 },
   'gemini-3.8-flash': { input: 1.5, cached: 0.15, output: 7.5 },
   'gemini-3.5-flash-lite': { input: 0.3, cached: 0.03, output: 2.5 },

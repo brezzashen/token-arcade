@@ -5,7 +5,9 @@ import { parseAccounts } from './report.ts';
 import { readRollingTelemetry, unavailableTelemetry } from './rolling.ts';
 import { readAntigravityReport } from './antigravity.ts';
 
-const { values } = parseArgs({ options: { 'range-script': { type: 'string' }, account: { type: 'string' } } });
+const { values } = parseArgs({ options: {
+  'range-script': { type: 'string' }, account: { type: 'string' }, 'prefer-server': { type: 'boolean', default: false },
+} });
 if (!values['range-script'] || !values.account) throw new Error('A range script and account are required.');
 const aliases = parseAccounts(values.account);
 if (aliases.length !== 1) throw new Error('Exactly one account is required.');
@@ -18,8 +20,10 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => {
   child?.kill('SIGTERM');
   process.exit(1);
 });
+const rangeArgs = ['--disable-warning=ExperimentalWarning', values['range-script']!, '--account', aliases[0],
+  ...(values['prefer-server'] ? ['--prefer-server'] : [])];
 const stdout = await new Promise<string>((resolve, reject) => {
-  child = execFile(process.execPath, ['--disable-warning=ExperimentalWarning', values['range-script']!, '--account', aliases[0]],
+  child = execFile(process.execPath, rangeArgs,
     { timeout: 40_000, maxBuffer: 24 * 1024 * 1024, killSignal: 'SIGTERM' }, (error, output) => {
       child = null;
       if (error) reject(new Error('Quota collection failed.'));

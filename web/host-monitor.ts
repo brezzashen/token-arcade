@@ -188,7 +188,7 @@ export function coreCards(snapshot: HostSnapshot, available: boolean): string {
         <div class="host-number">${percent(cpuUsed)}<small>总占用</small></div>
         ${meter(cpuUsed, `CPU 使用率 ${percent(cpuUsed)}`)}
         <div class="host-sub"><span>用户 <b>${percent(available ? snapshot.cpu.userPercent : null)}</b></span><span>系统 <b>${percent(available ? snapshot.cpu.sysPercent : null)}</b></span></div>
-        <div class="host-sub"><span>平均负载 (1/5/15m)</span><b>${escape(loadAvg)}</b></div>
+        <div class="host-sub"><span>负载 (1/5/15m)</span><b>${escape(loadAvg)}</b></div>
       </article>
       <article class="host-card">
         ${cardHead('gpu', 'GPU 使用率', snapshot.gpu.cores ? `${snapshot.gpu.cores} CORES` : 'METAL')}
@@ -234,7 +234,7 @@ export function hostMonitor(snapshot: HostSnapshot): string {
         ${cardHead('simulator', 'Xcode 模拟器', 'XCODE SIMULATOR')}
         <div class="host-dual">
           <div><div class="host-number is-compact">${gib(sim.memoryBytes)}</div><small class="host-unit"><span class="host-unit-line">内存占用 (物理)</span><span class="host-unit-line is-empty" aria-hidden="true">&nbsp;</span></small></div>
-          <div><div class="host-number is-compact">${percent(sim.cpuPercent)}</div><small class="host-unit"><span class="host-unit-line">CPU (单核 · 整机 ${percent(sim.hostCpuPercent)})</span><span class="host-unit-line is-empty" aria-hidden="true">&nbsp;</span></small></div>
+          <div><div class="host-number is-compact">${percent(sim.cpuPercent)}</div><small class="host-unit"><span class="host-unit-line">CPU · 整机 ${percent(sim.hostCpuPercent)}</span><span class="host-unit-line is-empty" aria-hidden="true">&nbsp;</span></small></div>
         </div>
         ${meter(memShare(sim.memoryBytes), `模拟器内存占比 ${percent(memShare(sim.memoryBytes))}`)}
         <div class="host-sub"><span>已启动模拟器 <b>${sim.bootedDevices !== null ? `${count(sim.bootedDevices)} 台` : '—'}</b></span><span>模拟器进程 <b>${count(sim.processes)}</b></span></div>
@@ -243,25 +243,25 @@ export function hostMonitor(snapshot: HostSnapshot): string {
         ${cardHead('docker', 'Docker 容器与虚拟机', 'DOCKER / LINUX VM')}
         <div class="host-dual">
           <div><div class="host-number is-compact">${gib(docker.memoryBytes)}</div><small class="host-unit"><span class="host-unit-line">内存占用 (VM+宿主)</span><span class="host-unit-line is-empty" aria-hidden="true">&nbsp;</span></small></div>
-          <div><div class="host-number is-compact">${percent(docker.cpuPercent)}</div><small class="host-unit"><span class="host-unit-line">CPU (单核 · 整机 ${percent(docker.hostCpuPercent)})</span><span class="host-unit-line is-empty" aria-hidden="true">&nbsp;</span></small></div>
+          <div><div class="host-number is-compact">${percent(docker.cpuPercent)}</div><small class="host-unit"><span class="host-unit-line">CPU · 整机 ${percent(docker.hostCpuPercent)}</span><span class="host-unit-line is-empty" aria-hidden="true">&nbsp;</span></small></div>
         </div>
         ${meter(memShare(docker.memoryBytes), `Docker 内存占比 ${percent(memShare(docker.memoryBytes))}`)}
         <div class="host-sub"><span>运行中容器 <b>${docker.containers !== null ? `${count(docker.containers)} 个` : '—'}</b></span><span>Docker 宿主进程 <b>${count(docker.processes)}</b></span></div>
       </article>
       <article class="host-card">
-        ${cardHead('chrome', 'Chrome 浏览器 (整体 + Headless)', 'CHROME / HEADLESS & GUI')}
+        ${cardHead('chrome', 'Chrome 浏览器', 'CHROME / HEADLESS & GUI')}
         <div class="host-dual">
           <div><div class="host-number is-compact">${gib(chrome.totalMemoryBytes)}</div><small class="host-unit"><span class="host-unit-line">整体浏览器内存</span><span class="host-unit-line">CPU ${percent(chrome.totalCpuPercent)}</span></small></div>
-          <div><div class="host-number is-compact">${gib(chrome.headlessMemoryBytes)}</div><small class="host-unit"><span class="host-unit-line">Headless 无头内存</span><span class="host-unit-line">CPU ${percent(chrome.headlessCpuPercent)}</span></small></div>
+          <div><div class="host-number is-compact">${gib(chrome.headlessMemoryBytes)}</div><small class="host-unit"><span class="host-unit-line">Headless 内存</span><span class="host-unit-line">CPU ${percent(chrome.headlessCpuPercent)}</span></small></div>
         </div>
         ${meter(memShare(chrome.totalMemoryBytes), `Chrome 总内存占比 ${percent(memShare(chrome.totalMemoryBytes))}`)}
-        <div class="host-sub"><span>Headless 渲染页 <b>${count(chrome.headlessRenderers)}</b> · 进程 <b>${count(chrome.headlessProcesses)}</b></span><span>有头浏览器 <b>${gib(chrome.guiMemoryBytes)}</b> (${count(chrome.guiProcesses)} 进程)</span></div>
+        <div class="host-sub"><span>Headless 渲染页 <b>${count(chrome.headlessRenderers)}</b></span><span>有头 <b>${gib(chrome.guiMemoryBytes)}</b> (${count(chrome.guiProcesses)})</span></div>
       </article>
       <article class="host-card">
         ${cardHead('vector', '向量与 Rerank 模型', 'QWEN3-4B ×2 · RERANK 0.6B')}
         <div class="host-dual">
-          <div><div class="host-number is-compact">${gib(vec.totalMemoryBytes)}</div><small class="host-unit"><span class="host-unit-line">总内存 · 向量 ${gib(vec.embeddingMemoryBytes)}</span><span class="host-unit-line">CPU ${percent(vec.totalCpuPercent)} · 整机 ${percent(vec.hostCpuPercent)}</span></small></div>
-          <div><div class="host-number is-compact">${gib(vec.rerankMemoryBytes)}</div><small class="host-unit"><span class="host-unit-line">Rerank 0.6B 重排</span><span class="host-unit-line">CPU ${percent(vec.rerankCpuPercent)} · 在线 ${vec.onlineModels !== null ? `${count(vec.onlineModels)}/3` : '—'}</span></small></div>
+          <div><div class="host-number is-compact">${gib(vec.totalMemoryBytes)}</div><small class="host-unit"><span class="host-unit-line">向量合计 ${gib(vec.embeddingMemoryBytes)}</span><span class="host-unit-line">CPU ${percent(vec.totalCpuPercent)} · 整机 ${percent(vec.hostCpuPercent)}</span></small></div>
+          <div><div class="host-number is-compact">${gib(vec.rerankMemoryBytes)}</div><small class="host-unit"><span class="host-unit-line">Rerank 0.6B 重排</span><span class="host-unit-line">CPU ${percent(vec.rerankCpuPercent)} · ${vec.onlineModels !== null ? `${count(vec.onlineModels)}/3 在线` : '—'}</span></small></div>
         </div>
         ${meter(memShare(vec.totalMemoryBytes), `向量与重排模型内存占比 ${percent(memShare(vec.totalMemoryBytes))}`)}
         <div class="host-sub"><span>索引 <b>${gib(vec.embedBatchMemoryBytes)}</b> (${percent(vec.embedBatchCpuPercent)})</span><span>查询 <b>${gib(vec.embedQueryMemoryBytes)}</b> (${percent(vec.embedQueryCpuPercent)})</span></div>

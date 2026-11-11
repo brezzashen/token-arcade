@@ -238,7 +238,7 @@ test('hostMonitor renders CPU, GPU, memory, concurrent OS threads and Simulator/
   assert.match(populatedMarkup, /已启动模拟器 <b>2 台<\/b>/);
   assert.match(populatedMarkup, /Docker 容器与虚拟机/);
   assert.match(populatedMarkup, /运行中容器 <b>5 个<\/b>/);
-  assert.match(populatedMarkup, /Chrome 浏览器 \(整体 \+ Headless\)/);
+  assert.match(populatedMarkup, /Chrome 浏览器/);
   assert.match(populatedMarkup, /Headless 渲染页 <b>10<\/b>/);
   assert.match(populatedMarkup, /向量与 Rerank 模型/);
   assert.match(populatedMarkup, /索引 <b>6\.33 GB<\/b> \(17\.2%\)/);

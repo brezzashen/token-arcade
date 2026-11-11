@@ -12,8 +12,10 @@ export function claudeResponse(message: any, at: number, threadId: string, turnI
   const input = valid ? u.input_tokens + read + write : null;
   const reasoning = u.output_tokens_details?.thinking_tokens;
   const ttl = u.cache_creation, hour = ttl?.ephemeral_1h_input_tokens, minutes = ttl?.ephemeral_5m_input_tokens;
-  // The TTL split prices each cache write exactly; a record without a consistent split stays unknown unless nothing was written.
-  const write1h = valid && counter(hour) && counter(minutes) && hour + minutes === write ? hour : valid && write === 0 ? 0 : null;
+  // The TTL split prices each cache write exactly. Some responses report a split that sums below the total (about 1K tokens
+  // on one response in 20,000, first seen 2026-11-10); that remainder is priced with the one-hour writes, the higher rate.
+  // A record with no split, or one above the total, stays unknown unless nothing was written.
+  const write1h = valid && counter(hour) && counter(minutes) && hour + minutes <= write ? write - minutes : valid && write === 0 ? 0 : null;
   return { responseId: typeof message.id === 'string' && message.id ? message.id : null, at, threadId, turnId,
     model: typeof message.model === 'string' ? message.model : 'unknown',
     input: counter(input) ? input : null, cachedInput: valid ? read : null, cacheCreationInput: valid ? write : null,
@@ -97,6 +99,7 @@ export async function readClaudeUsageRecords(configDir: string, start: number, e
   const files: string[] = [];
   try {
     for (const project of readdirSync(root)) {
+      if (project.includes('antigravity-orca-bridge')) continue;
       const dir = join(root, project);
       if (!statSync(dir).isDirectory()) continue;
       for (const name of readdirSync(dir)) {

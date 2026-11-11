@@ -24,6 +24,7 @@ try {
     benchmark: { type: 'boolean', default: false },
     account: { type: 'string' },
     agent: { type: 'string', default: 'codex' },
+    'prefer-server': { type: 'boolean', default: false },
     'claude-home': { type: 'string', default: process.env.CLAUDE_CONFIG_DIR ?? `${homedir()}/.claude` },
     'gemini-home': { type: 'string', default: `${homedir()}/.config/cg4/claude-home` },
     'grok-home': { type: 'string', default: `${homedir()}/.grok` },
@@ -43,9 +44,10 @@ try {
     else values['grok-home'] = selected.grokHome!;
   }
   // A named alias must authenticate as that profile, never as an ambient session token.
+  const preferServer = values['prefer-server'] === true;
   const claudeQuotaReader = values.account
-    ? (configDir: string) => fetchClaudeQuota(configDir, { ignoreEnvCredentials: true, refreshExpiredLogin: refreshClaudeLogin })
-    : fetchClaudeQuota;
+    ? (configDir: string) => fetchClaudeQuota(configDir, { ignoreEnvCredentials: true, refreshExpiredLogin: refreshClaudeLogin, preferServer })
+    : preferServer ? (configDir: string) => fetchClaudeQuota(configDir, { preferServer }) : fetchClaudeQuota;
   const home = resolve(values.home!);
   const timezone = values.timezone!;
   const lookbackHours = Number(values['lookback-hours']);

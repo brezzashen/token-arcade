@@ -1,12 +1,12 @@
 /**
- * Resolves the local agent-account profiles this machine is logged into (the `cc1`-`cc5` /
+ * Resolves the local agent-account profiles this machine is logged into (the `cc1`-`cc7` /
  * `co1`-`co2` shell aliases plus the Grok CLI profile) and reads one current quota snapshot per account, keeping every
  * account, provider and quota window separate.
  *
  * Depends on `grok-quota.ts` (stored Grok CLI login and one billing read), `claude-quota.ts` (OAuth usage endpoint) and
  * `quota.ts` (authenticated `codex app-server` RPC per Codex home); publishes `AccountRef`,
  * `AccountQuota`, the registry/discovery helpers and `readAccountsQuota` for `accounts.ts`, plus
- * `accountLabel`, which names the profile behind a `range.ts` report (`cc1 · admin`).
+ * `accountLabel`, which names the profile behind a `range.ts` report (`cc1 · default`).
  * Unlike `range.ts`, which builds one deep report for the selected profile, this module is the
  * breadth view: current percentages only, no local token records and no forecast.
  *
@@ -27,7 +27,7 @@ import { fetchGrokQuota } from './grok-quota.ts';
 export type Agent = 'claude' | 'codex' | 'grok' | 'gemini';
 
 export type AccountRef = {
-  /** Account selector: cc1-cc5 (Claude), co1-co2 (Codex), grok (the CLI profile), or gm (Gemini 4 Argon via cg4). */
+  /** Account selector: cc1-cc7 (Claude), co1-co2 (Codex), grok (the CLI profile), or gm (Gemini 4 Argon via cg4). */
   alias: string;
   agent: Agent;
   /** Profile directory name (`default` for `~/.claude` and `~/.codex`). */
@@ -73,7 +73,7 @@ export type AccountQuota = AccountRef & {
 const WEEK_MINUTES = 7 * 24 * 60;
 
 /**
- * Named local profiles. cc1 is `~/.claude` and co1 is `~/.codex`; cc2-cc5 and co2 take the profile
+ * Named local profiles. cc1 is `~/.claude` and co1 is `~/.codex`; cc2-cc7 and co2 take the profile
  * directories named in `TOKEN_CLAUDE_PROFILES` / `TOKEN_CODEX_PROFILES` (comma-separated), or else the
  * first sub-directories of `~/.claude-profiles` / `~/.codex-profiles` in name order.
  * Grok uses its CLI command rather than an invented numbered alias.
@@ -95,7 +95,7 @@ export function registeredAccounts(home = homedir(), env: NodeJS.ProcessEnv = pr
   });
   return [
     claude('cc1', 'default', '.claude'),
-    ...profiles('TOKEN_CLAUDE_PROFILES', '.claude-profiles', 4).map((name, i) => claude(`cc${i + 2}`, name, `.claude-profiles/${name}`)),
+    ...profiles('TOKEN_CLAUDE_PROFILES', '.claude-profiles', 6).map((name, i) => claude(`cc${i + 2}`, name, `.claude-profiles/${name}`)),
     codex('co1', 'default', '.codex'),
     ...profiles('TOKEN_CODEX_PROFILES', '.codex-profiles', 1).map(name => codex('co2', name, `.codex-profiles/${name}`)),
     { alias: 'grok', agent: 'grok', profile: 'main', home: join(home, '.grok'),

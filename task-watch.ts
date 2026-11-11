@@ -5,9 +5,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
 import { TaskOutput } from './task-output.ts';
 import { dialogRetentionMs } from './dialog-speed.ts';
-import { loadCheckpoint, saveCheckpoint, matches, stamp } from './task-checkpoint.ts';
+import { loadCheckpoint, saveCheckpoint, matches, stamp, type FileStamp } from './task-checkpoint.ts';
 
-type Tail = { offset: number; pending: Buffer; parser: TaskOutput; account: string; owner?: string; samples: Map<string, any>; dirty: boolean };
+type Tail = { offset: number; pending: Buffer; parser: TaskOutput; account: string; owner?: string; samples: Map<string, any>;
+  dirty: boolean; stamp?: FileStamp; checkpoint?: ReturnType<TaskOutput['checkpoint']> };
 export class TaskWatch {
   private tails = new Map<string, Tail>();
   private seen = new Map<string, Set<string>>();
@@ -20,6 +21,10 @@ export class TaskWatch {
   private reading = false;
   private closing = false;
   private checkpointPath?: string;
+  /** Last time the loop advanced and the step it was in; the worker restarts itself when this stops moving. */
+  progressAt = Date.now();
+  stage = 'idle';
+  private mark(stage: string) { this.stage = stage; this.progressAt = Date.now(); }
   constructor(profiles: any[], count: (text: string) => number, identity: (home: string) => string, publish: (sample: any) => void,
     checkpointPath?: string) {
     this.profiles = profiles; this.count = count; this.identity = identity; this.publish = publish;
@@ -28,6 +33,7 @@ export class TaskWatch {
   async discover() {
     await this.restore();
     for (const profile of this.profiles) {
+      this.mark('discover');
       try {
         if (profile.agent === 'codex') {
           const owner = this.identity(profile.home);
@@ -49,10 +55,11 @@ export class TaskWatch {
   private async claudeFiles(dir: string, alias: string, depth = 0) {
     if (depth > 4) return;
     for (const entry of await readdir(dir, { withFileTypes: true })) {
-      if (entry.name.includes('antigravity-orca-bridge')) continue;
+      if (entry.name.includes('antigravity-orca-bridge') || entry.name === 'tool-results') continue;
+      this.mark('discover');
       const path = resolve(dir, entry.name);
       if (entry.isDirectory()) await this.claudeFiles(path, alias, depth + 1);
-      else if (entry.name.endsWith('.jsonl') && (await stat(path)).mtimeMs > Date.now() - dialogRetentionMs) this.add(path, alias);
+      else if (entry.name.endsWith('.jsonl') && !this.tails.has(path) && (await stat(path)).mtimeMs > Date.now() - dialogRetentionMs) this.add(path, alias);
     }
   }
   private add(path: string, account: string, owner?: string) {
@@ -60,27 +67,32 @@ export class TaskWatch {
     if (!this.tails.has(path)) this.tails.set(path, { offset: 0, pending: Buffer.alloc(0),
       parser: new TaskOutput(this.count, account, owner, this.seen.get(account), path), account, owner, samples: new Map(), dirty: true });
   }
-  private async restore() {
+  async restore() {
     if (this.loaded) return;
     this.loaded = true;
     const saved = this.checkpointPath && await loadCheckpoint(this.checkpointPath);
     if (!saved) return;
+    this.savedAt = Date.now();
     for (const profile of this.profiles) {
       try {
         const owner = profile.agent === 'codex' ? this.identity(profile.home) : undefined;
         const rows = saved.tails.filter((row: any) => row.account === profile.alias);
         if (!rows.length || rows.some((row: any) => row.home !== profile.home || row.owner !== owner)) continue;
-        let valid = true;
-        for (let offset = 0; offset < rows.length && valid; offset += 16) {
-          valid = (await Promise.all(rows.slice(offset, offset + 16)
-            .map((row: any) => matches(row.path, row.offset, row.stamp)))).every(Boolean);
+        const checks: boolean[] = [];
+        for (let offset = 0; offset < rows.length; offset += 16) {
+          this.mark('restore');
+          checks.push(...await Promise.all(rows.slice(offset, offset + 16)
+            .map((row: any) => matches(row.path, row.offset, row.stamp))));
         }
-        if (!valid) continue;
+        if (profile.agent === 'codex' && !checks.every(Boolean)) continue;
         this.seen.set(profile.alias, new Set(saved.seen.find(([alias]: any) => alias === profile.alias)?.[1] ?? []));
-        for (const row of rows) {
+        for (let i = 0; i < rows.length; i++) {
+          if (!checks[i]) continue;
+          const row = rows[i];
           this.add(row.path, profile.alias, owner);
           const tail = this.tails.get(row.path)!;
           tail.parser.restore(row.parser); tail.offset = row.offset; tail.dirty = false;
+          tail.stamp = row.stamp; tail.checkpoint = row.parser;
           for (const sample of row.samples) if (Date.parse(sample.sampledAt) > Date.now() - dialogRetentionMs) {
             tail.samples.set(sample.sampleId, sample); this.publish(sample);
           }
@@ -92,17 +104,24 @@ export class TaskWatch {
     if (!this.checkpointPath || ![...this.tails.values()].some(tail => tail.dirty)) return;
     const tails = [];
     for (const [path, tail] of this.tails) {
+      this.mark('flush:stamp');
       try {
         const offset = tail.offset - tail.pending.length;
         for (const [id, sample] of tail.samples) if (Date.parse(sample.sampledAt) <= Date.now() - dialogRetentionMs) tail.samples.delete(id);
         const samples = [...tail.samples.values()];
-        tails.push({ path, account: tail.account, owner: tail.owner, offset, parser: tail.parser.checkpoint(),
-          home: this.profiles.find(profile => profile.alias === tail.account)?.home, samples, stamp: await stamp(path, offset) });
+        if (tail.dirty || !tail.stamp || !tail.checkpoint) {
+          tail.stamp = await stamp(path, offset);
+          tail.checkpoint = tail.parser.checkpoint();
+          tail.dirty = false;
+        }
+        tails.push({ path, account: tail.account, owner: tail.owner, offset, parser: tail.checkpoint,
+          home: this.profiles.find(profile => profile.alias === tail.account)?.home, samples, stamp: tail.stamp });
       } catch { /* Vanished transcripts are rediscovered without reusing their checkpoint. */ }
     }
+    this.mark('flush:save');
     await saveCheckpoint(this.checkpointPath, { version: 1, tails, seen: [...this.seen].map(([alias, ids]) => [alias, [...ids]]) });
-    for (const tail of this.tails.values()) tail.dirty = false;
     this.savedAt = Date.now();
+    this.mark('flush:done');
   }
   async close() {
     this.closing = true;
@@ -115,10 +134,12 @@ export class TaskWatch {
     try {
     for (const [path, tail] of this.tails) {
       if (this.closing) break;
+      this.mark('poll:stat');
       try {
-        const size = (await stat(path)).size;
+        const info = await stat(path), size = info.size;
         if (size < tail.offset) { this.tails.delete(path); this.seen.get(tail.account)?.clear(); this.add(path, tail.account, tail.owner); continue; }
-        if (size === tail.offset) continue;
+        if (size === tail.offset) { if (tail.stamp && info.mtimeMs !== tail.stamp.mtimeMs) tail.dirty = true; continue; }
+        this.mark('poll:read');
         const input = createReadStream(path, { start: tail.offset, end: size - 1 });
         let pending = tail.pending;
         for await (const chunk of input) {
@@ -132,6 +153,7 @@ export class TaskWatch {
             } catch { /* Incomplete or malformed records cannot supply a speed sample. */ }
           }
           tail.offset += chunk.length; tail.pending = pending; tail.dirty = true;
+          this.mark('poll:read');
           // Yield between chunks so startup progress and the supervisor stay responsive during backfill.
           await new Promise<void>(resolve => setImmediate(resolve));
           if (this.closing) break;
@@ -139,6 +161,7 @@ export class TaskWatch {
       } catch { this.tails.delete(path); }
     }
     if (Date.now() - this.savedAt >= 30_000) await this.flush();
+    this.mark('idle');
     } finally { this.reading = false; }
   }
 }

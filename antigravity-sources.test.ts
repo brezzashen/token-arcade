@@ -100,16 +100,23 @@ test('SQLite reader selects finished planner responses and resolves their record
     const db = new DatabaseSync(join(dir, 'test-conversation.db'));
     db.exec('CREATE TABLE gen_metadata (data BLOB); CREATE TABLE steps (idx INTEGER, step_type INTEGER, status INTEGER, metadata BLOB);');
     const info = message(1, Buffer.concat([int(3, 1419), message(19, Buffer.from('gemini-4-argon'))]));
+    const carbonDisplayOnly = message(1, Buffer.concat([int(3, 1437), message(21, Buffer.from('Gemini 4 Carbon (Medium)'))]));
     db.prepare('INSERT INTO gen_metadata VALUES (?)').run(info);
+    db.prepare('INSERT INTO gen_metadata VALUES (?)').run(carbonDisplayOnly);
     const insert = db.prepare('INSERT INTO steps VALUES (?, ?, ?, ?)');
     insert.run(1, 15, 3, metadata(now - 11_000, now - 1000));
     insert.run(2, 15, 2, metadata(now - 11_000, now - 1000));
     insert.run(3, 132, 3, metadata(now - 11_000, now - 1000));
+    insert.run(4, 15, 3, Buffer.concat([time(1, now - 6_000, 100_000), time(7, now - 1_000, 900_000),
+      message(9, Buffer.concat([int(1, 1437), int(3, 480), int(6, 24)]))]));
     db.close();
     const samples = await readAntigravitySpeed(home, now);
-    assert.equal(samples.length, 1);
+    assert.equal(samples.length, 2);
     assert.equal(samples[0].model, 'gemini-4-argon');
     assert.equal(samples[0].tokensPerSecond, 60);
+    assert.equal(samples[1].model, 'gemini-4-carbon');
+    assert.equal(samples[1].account, 'ag1');
+    assert.equal(samples[1].tokensPerSecond, 96);
   } finally { await rm(home, { recursive: true, force: true }); }
 });
 

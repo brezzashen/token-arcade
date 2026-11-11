@@ -24,6 +24,8 @@ export type ClaudeQuotaOptions = {
   ignoreEnvCredentials?: boolean;
   /** Lets the Claude CLI renew an expired stored login once before the read gives up (claude-login-refresh.ts). */
   refreshExpiredLogin?: (configDir: string) => boolean;
+  /** Queries the usage endpoint even when statusline is fresh so server-scoped model limits (Fable) stay updated. */
+  preferServer?: boolean;
   now?: number;
 };
 
@@ -56,24 +58,34 @@ function storedCredentials(configDir: string): Credential[] {
 
 export function normalizeClaudeQuota(raw: any, at = Date.now()) {
   const windows: Array<{ window: string; windowMinutes: number; usedPercent: number; remainingPercent: number;
-    resetsAt: string | null; modelScope: { id: string | null; label: string | null } | null; surfaceScope: string | null }> = [];
+    resetsAt: string | null; modelScope: { id: string | null; label: string | null } | null; surfaceScope: string | null;
+    weeklyShare: { usedPercent: number | null; allowancePercent: number | null } | null }> = [];
   let invalidWindows = 0;
-  const add = (key: string, minutes: number, percent: unknown, reset: unknown, scope: any = null) => {
+  const shares = Array.isArray(raw?.weekly_scoped_shares) ? raw.weekly_scoped_shares : [];
+  const add = (key: string, minutes: number, percent: unknown, reset: unknown, scope: any = null, share: any = null) => {
     if (typeof percent !== 'number' || !Number.isFinite(percent) || percent < 0 || percent > 100) {
       invalidWindows++; return;
     }
     const resetMs = typeof reset === 'string' ? Date.parse(reset) : NaN;
     if (reset !== null && reset !== undefined && !Number.isFinite(resetMs)) { invalidWindows++; return; }
+    const shareUsed = typeof share?.used_percent_of_weekly === 'number' && Number.isFinite(share.used_percent_of_weekly)
+      ? share.used_percent_of_weekly : null;
+    const shareCap = typeof share?.allowance_percent_of_weekly === 'number' && Number.isFinite(share.allowance_percent_of_weekly)
+      ? share.allowance_percent_of_weekly : null;
     windows.push({ window: key, windowMinutes: minutes, usedPercent: percent, remainingPercent: 100 - percent,
       resetsAt: Number.isFinite(resetMs) ? new Date(resetMs).toISOString() : null,
       modelScope: scope?.model ? { id: typeof scope.model.id === 'string' ? scope.model.id : null,
         label: typeof scope.model.display_name === 'string' ? scope.model.display_name : null } : null,
-      surfaceScope: typeof scope?.surface === 'string' ? scope.surface : null });
+      surfaceScope: typeof scope?.surface === 'string' ? scope.surface : null,
+      weeklyShare: shareUsed !== null || shareCap !== null ? { usedPercent: shareUsed, allowancePercent: shareCap } : null });
   };
   if (Array.isArray(raw?.limits) && raw.limits.length) {
+    const weeklyReset = raw.limits.find((item: any) => item?.kind === 'weekly_all')?.resets_at ?? null;
     for (const [i, limit] of raw.limits.entries()) {
       if (!['session', 'weekly_all', 'weekly_scoped'].includes(limit?.kind)) { invalidWindows++; continue; }
-      add(`claude:${limit.kind}:${i}`, limit.kind === 'session' ? 300 : 10080, limit.percent, limit.resets_at, limit.scope);
+      const share = shares.find((item: any) => item?.limit_index === i) ?? null;
+      const reset = limit.resets_at ?? (limit.kind === 'weekly_scoped' ? weeklyReset : null);
+      add(`claude:${limit.kind}:${i}`, limit.kind === 'session' ? 300 : 10080, limit.percent, reset, limit.scope, share);
     }
   } else {
     for (const [key, label] of [['five_hour', null], ['seven_day', null], ['seven_day_opus', 'Opus'], ['seven_day_sonnet', 'Sonnet']] as const) {
@@ -120,7 +132,9 @@ export async function fetchClaudeQuota(configDir: string, options: ClaudeQuotaOp
   try {
     const auth = credential(configDir, options);
     plan = auth.subscriptionType ?? 'unknown';
-    if (passive && now - Date.parse(passive.observedAt) < STATUSLINE_FRESH_MS) return { ...passive, planReportedByCredentials: plan };
+    if (!options.preferServer && passive && now - Date.parse(passive.observedAt) < STATUSLINE_FRESH_MS) {
+      return { ...passive, planReportedByCredentials: plan };
+    }
     return { ...await requestClaudeQuota(auth), planReportedByCredentials: plan };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Claude usage request failed.';

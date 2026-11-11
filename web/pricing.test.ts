@@ -48,15 +48,23 @@ test('unknown models, missing usage and inconsistent subsets never produce a pri
   assert.equal(accountCost(account).discount, null);
   assert.match(pricing([account]), /暂无可比用量/);
   assert.match(pricing([account]), /\$500\.00/);
-  const gemini = projectReport('gm', { tokens: { byModel: [{ model: 'gemini-4-argon',
+  const gemini = projectReport('ag1', { tokens: { byModel: [{ model: 'gemini-4-carbon',
     inputTokens: 1_000_000, cachedInputTokens: 800_000, cacheCreationInputTokens: 0, cacheCreation1hInputTokens: 0,
-    outputTokens: 100_000, reasoningOutputTokens: 40_000, longContext: longContext() }] } });
+    outputTokens: 100_000, reasoningOutputTokens: 40_000, longContext: longContext({ thresholdInputTokens: 200_000 }) }] } });
   assert.equal(gemini.provider, 'Gemini');
   assert.equal(gemini.models[0].reasoningOutputTokens, 40_000);
-  assert.equal(accountCost(gemini).dayCost, null);
+  near(accountCost(gemini).dayCost, 1.48);
+  near(accountCost(gemini).monthly, 44.4);
   assert.equal(accountCost(gemini).fee, null);
   assert.equal(accountCost(gemini).discount, null);
+  assert.match(pricing([gemini]), /gemini-4-carbon/);
+  assert.match(pricing([gemini]), /\$44\.40/);
   assert.match(pricing([gemini]), /月费待确认/);
   assert.match(pricing([gemini]), /Google AI Ultra/);
-  assert.doesNotMatch(pricing([gemini]), /按量计费|Vertex AI/);
+  assert.doesNotMatch(pricing([gemini]), /按量计费|Vertex AI|未核对单价/);
+  const unknownGemini = projectReport('ag1', { tokens: { byModel: [{ model: 'gemini-4-argon-b',
+    inputTokens: 1_000_000, cachedInputTokens: 800_000, cacheCreationInputTokens: 0, cacheCreation1hInputTokens: 0,
+    outputTokens: 100_000, longContext: longContext({ thresholdInputTokens: 200_000 }) }] } });
+  assert.equal(accountCost(unknownGemini).dayCost, null);
+  assert.match(pricing([unknownGemini]), /未核对单价：gemini-4-argon-b/);
 });

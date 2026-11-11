@@ -216,7 +216,8 @@ test('price counters keep the 1-hour cache-write subset and group requests above
   assert.equal(split.cacheCreation1hInput, 30);
   assert.equal(claudeResponse(usage(5, 100, 40), at, 't', 'a', 's').cacheCreation1hInput, null);
   assert.equal(claudeResponse(usage(5, 100, 0), at, 't', 'a', 's').cacheCreation1hInput, 0);
-  assert.equal(claudeResponse(usage(5, 100, 40, { ephemeral_5m_input_tokens: 1, ephemeral_1h_input_tokens: 1 }), at, 't', 'a', 's').cacheCreation1hInput, null);
+  assert.equal(claudeResponse(usage(5, 100, 40, { ephemeral_5m_input_tokens: 1, ephemeral_1h_input_tokens: 1 }), at, 't', 'a', 's').cacheCreation1hInput, 39);
+  assert.equal(claudeResponse(usage(5, 100, 40, { ephemeral_5m_input_tokens: 30, ephemeral_1h_input_tokens: 20 }), at, 't', 'a', 's').cacheCreation1hInput, null);
   const big = claudeResponse(usage(1000, 300_000, 0), at + 10, 't', 'b', 's');
   const r = tokenWindow({ turns: [], points: [], anchors: [], diagnostics: {}, cacheResponses: [split, big] }, at, at + 100);
   assert.equal(r.cacheCreation1hInputTokens, 30);

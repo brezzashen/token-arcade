@@ -5,6 +5,9 @@ export function normalizeMode(mode: unknown) {
   return ['default', 'standard'].includes(value) ? 'standard' : ['priority', 'fast'].includes(value) ? 'fast'
     : ['ultrafast', 'vertex', 'subscription'].includes(value) ? value : 'unknown';
 }
+/** Collector liveness from the time since its poll loop last advanced: republish readings only while live, restart once stalled. */
+export const pollLive = (quietMs: number) => quietMs < 30_000;
+export const pollStalled = (quietMs: number) => quietMs >= 120_000;
 export const sampleKey = (sample: { model: string; mode?: string }) => `${sample.model}|${normalizeMode(sample.mode)}`;
 export const freshTask = (sample: Sample | undefined, now: number) => !!sample && sample.source === 'task'
   && sample.tokensPerSecond !== null && Date.parse(sample.sampledAt) > now - 3600_000;

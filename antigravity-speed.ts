@@ -74,12 +74,29 @@ export function antigravityResponse(metadata: Uint8Array, id: string, conversati
     basis: 'recorded_response_including_first_token_wait' };
 }
 
+const displayModels: [RegExp, string][] = [
+  [/^Gemini 4 Carbon\b/i, 'gemini-4-carbon'],
+  [/^Gemini 4 Argon\b/i, 'gemini-4-argon'],
+  [/^Gemini 3\.8 Flash\b/i, 'gemini-3.8-flash'],
+  [/^Gemini 3\.5 Flash[- ]Lite\b/i, 'gemini-3.5-flash-lite'],
+];
+
 export function readConversationModels(db: DatabaseSync) {
   const models = new Map<number, string>();
   for (const row of db.prepare('SELECT data FROM gen_metadata').all() as { data: Uint8Array }[]) {
     try {
       const info = nested(decodeWire(row.data), 1), enumId = number(info, 3), model = first(info, 19);
-      if (enumId !== undefined && Buffer.isBuffer(model) && /^[a-z0-9][a-z0-9._-]{1,100}$/i.test(model.toString())) models.set(enumId, model.toString());
+      if (enumId === undefined) continue;
+      if (Buffer.isBuffer(model) && /^[a-z0-9][a-z0-9._-]{1,100}$/i.test(model.toString())) {
+        models.set(enumId, model.toString());
+        continue;
+      }
+      if (!models.has(enumId)) {
+        const label = first(info, 21);
+        const text = Buffer.isBuffer(label) ? label.toString() : '';
+        const matched = displayModels.find(([pattern]) => pattern.test(text));
+        if (matched) models.set(enumId, matched[1]);
+      }
     } catch { /* Unrecognized metadata remains unavailable. */ }
   }
   return models;
@@ -100,21 +117,23 @@ export async function readAntigravitySpeed(home = homedir(), now = Date.now()) {
       if (mtimeMs < now - dialogRetentionMs) { dbCache.delete(path); continue; }
       let cached = dbCache.get(path);
       if (!cached || cached.mtimeMs !== mtimeMs) {
-        const db = new DatabaseSync(path, { readOnly: true });
         try {
-          const models = readConversationModels(db);
-          const steps = db.prepare('SELECT idx, metadata FROM steps WHERE step_type = 15 AND status = 3').all() as { idx: number; metadata: Uint8Array }[];
-          const conversation = basename(name, '.db'), since = now - dialogRetentionMs;
-          const decoded = steps.flatMap(row => {
-            try {
-              const sample = antigravityResponse(row.metadata, String(row.idx), conversation, models, since, now);
-              return sample ? [sample] : [];
-            } catch { return []; }
-          });
-          cached = { mtimeMs, samples: decoded };
-          if (dbCache.size > 256) dbCache.delete(dbCache.keys().next().value!);
-          dbCache.set(path, cached);
-        } finally { db.close(); }
+          const db = new DatabaseSync(path, { readOnly: true, timeout: 2000 } as any);
+          try {
+            const models = readConversationModels(db);
+            const steps = db.prepare('SELECT idx, metadata FROM steps WHERE step_type = 15 AND status = 3').all() as { idx: number; metadata: Uint8Array }[];
+            const conversation = basename(name, '.db'), since = now - dialogRetentionMs;
+            const decoded = steps.flatMap(row => {
+              try {
+                const sample = antigravityResponse(row.metadata, String(row.idx), conversation, models, since, now);
+                return sample ? [sample] : [];
+              } catch { return []; }
+            });
+            cached = { mtimeMs, samples: decoded };
+            if (dbCache.size > 256) dbCache.delete(dbCache.keys().next().value!);
+            dbCache.set(path, cached);
+          } finally { db.close(); }
+        } catch { if (!cached) continue; }
       }
       for (const sample of cached.samples) if (Date.parse(sample.sampledAt) > now - dialogRetentionMs) samples.push(sample);
     } catch { /* A database can disappear when the CLI deletes a conversation. */ }

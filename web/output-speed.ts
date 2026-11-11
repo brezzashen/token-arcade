@@ -13,7 +13,7 @@ export type SpeedSnapshot = { samples: SpeedSample[]; nextFallbackAt: number | n
   intervals?: SpeedInterval[]; accounts?: string[] };
 // One card per local account in registry order, then other recorded accounts by name. Each card follows the model the
 // account answered with most recently; speed never moves a card. Grok has no local conversation records.
-const defaultAccounts = ['cc1', 'cc2', 'cc3', 'cc4', 'cc5', 'co1', 'co2', 'ag1', 'ag2'];
+const defaultAccounts = ['cc1', 'cc2', 'cc3', 'cc4', 'cc5', 'cc6', 'cc7', 'co1', 'co2', 'ag1', 'ag2'];
 const rateCells = (cells: [string, number | null | undefined, string][]) => `<div class="speed-primary${cells.length === 1 ? ' is-single' : ''}">${cells
   .map(([label, value, unit]) => `<div><span>${label}</span><strong>${typeof value === 'number' ? value.toFixed(1) : '—'}</strong><small>${unit}</small></div>`).join('')}</div>`;
 const primaryRates = (reasoning?: number | null, output?: number | null) => rateCells([['思考', reasoning, 'token/s'], ['输出', output, 'token/s']]);
@@ -77,7 +77,7 @@ export function outputSpeed(snapshot: SpeedSnapshot, now = Date.now()) {
     const rate = (value: number | null | undefined) => available(row) && value != null ? `≈${value.toFixed(1)}` : '—';
     const geminiPool = isGemini
       ? (historical ? historical.samples : rows).filter(item => accountProvider(item.account) === 'Gemini' && item.model === model) : group;
-    return `<article class="speed-card ${live ? 'is-streaming' : ''}" data-provider="${providerOf(model)}"><div class="speed-meta"><span>${escape(account)} · ${row.source === 'task' ? '正在用' : '兜底测速'}</span><span class="speed-state">${state}</span></div>
+    return `<article class="speed-card ${live ? 'is-streaming' : ''}" data-provider="${providerOf(model)}"><div class="speed-meta"><span>${escape(account)} · ${row.source !== 'task' ? '兜底测速' : historical ? '最近用过' : '正在用'}</span><span class="speed-state">${state}</span></div>
       <h3>${escape(row.model)}</h3><div class="speed-mode ${mode === 'fast' ? 'is-fast' : ''}">${modeLabel(mode)}<span>${mode === 'unknown' ? '缺少模式记录' : row.speedBasis === 'response' ? '响应记录' : row.speedBasis === 'mixed' ? '混合记录' : '请求配置'}</span></div>
       ${row.responseSampleCount ? isGemini ? rateCells([['整段响应', available(row) ? row.responseTokensPerSecond : null, '含首字等待 · token/s']]) : responseRates(available(row) ? row.responseTokensPerSecond : null)
         : primaryRates(available(row) ? row.reasoningTokensPerSecond : null, available(row) ? row.outputTokensPerSecond : null)}

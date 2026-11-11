@@ -6,6 +6,10 @@ import type { windowForecast } from './forecast.ts';
 
 /** OpenAI bills a whole request at long-context rates above this many input tokens (gpt-6.1-sol pricing, checked 2026-10-07). */
 export const LONG_CONTEXT_INPUT_TOKENS = 272_000;
+/** Anthropic bills a Claude Haiku 5.5 request whose prompt exceeds this many tokens at its higher tier (pricing page, checked 2026-11-10). */
+export const HAIKU_LONG_PROMPT_TOKENS = 100_000;
+export const longContextThreshold = (model?: string | null) =>
+  model?.startsWith('claude-haiku-5-5') ? HAIKU_LONG_PROMPT_TOKENS : LONG_CONTEXT_INPUT_TOKENS;
 type Usage = { input: number | null; cachedInput: number | null; output?: number | null;
   cacheCreationInput?: number | null; cacheCreation1hInput?: number | null };
 
@@ -18,7 +22,7 @@ function priceCounters(responses: Usage[]) {
     outputTokens: sum(r => r.output) };
 }
 
-export function tokenWindow(records: Records, start: number, end: number, threadId?: string) {
+export function tokenWindow(records: Records, start: number, end: number, threadId?: string, longThreshold = LONG_CONTEXT_INPUT_TOKENS) {
   const { responses, turns, duplicateResponses } = usageWindow(records, start, end, threadId);
   const valid = responses.filter(r => r.responseId !== null && r.input !== null && r.cachedInput !== null
     && Number.isSafeInteger(r.output) && r.output! >= 0);
@@ -47,8 +51,8 @@ export function tokenWindow(records: Records, start: number, end: number, thread
     inputTokens, cachedInputTokens,
     cacheCreationInputTokens, cacheCreation1hInputTokens,
     // Requests above the long-context boundary, already included in the totals above.
-    longContext: { thresholdInputTokens: LONG_CONTEXT_INPUT_TOKENS,
-      ...priceCounters(valid.filter(r => r.input! > LONG_CONTEXT_INPUT_TOKENS)) },
+    longContext: { thresholdInputTokens: longThreshold,
+      ...priceCounters(valid.filter(r => r.input! > longThreshold)) },
     plainInputTokens: inputTokens === null || cachedInputTokens === null || cacheCreationInputTokens === null
       ? null : inputTokens - cachedInputTokens - cacheCreationInputTokens,
     uncachedInputTokens: inputTokens === null || cachedInputTokens === null ? null : inputTokens - cachedInputTokens,
@@ -64,6 +68,15 @@ export function tokenWindow(records: Records, start: number, end: number, thread
   };
 }
 
+/** One token window per recorded model, each with the long-request counters of that model's own price tier. */
+export function modelWindows(records: Records, start: number, end: number) {
+  const { responses } = usageWindow(records, start, end);
+  return [...new Set(responses.map(r => r.model))].map(model => ({ model, ...tokenWindow({ ...records,
+    turns: records.turns.filter(t => t.model === model),
+    cacheResponses: responses.filter(r => r.model === model),
+  }, start, end, undefined, longContextThreshold(model)) }));
+}
+
 /**
  * Cumulative consumption since a quota window last reset, from `resetsAt - windowMinutes` to capture.
  * The window restarts at zero, so its used percentage is an observed delta over exactly this interval.
@@ -75,7 +88,8 @@ export function cycleTokenConsumption(records: Records, window: { resetsAt: numb
   const scoped = model ? { ...records, turns: records.turns.filter(t => model(t.model)),
     cacheResponses: records.cacheResponses?.filter(r => model(r.model)) } : records;
   const tokens = tokenWindow(scoped, start, end), used = window.usedPercent;
-  return { ...tokens, intervalBasis: 'resetsAt minus windowMinutes, to capture', quotaPercentagePoints: used,
+  return { ...tokens, byModel: modelWindows(scoped, start, end),
+    intervalBasis: 'resetsAt minus windowMinutes, to capture', quotaPercentagePoints: used,
     tokensPerQuotaPercentagePoint: tokens.totalTokens !== null && used > 0 ? tokens.totalTokens / used : null,
     // Linear extrapolation of this cycle's observed mix to 100%; not a published allowance.
     projectedTokensPerFullWindow: tokens.totalTokens !== null && used > 0 ? tokens.totalTokens / used * 100 : null,
@@ -95,7 +109,6 @@ export function quotaTokenConsumption(records: Records, window: ReturnType<typeo
 }
 
 export function buildTokenReport(records: Records, start: number, end: number, currentThreadId?: string) {
-  const { responses } = usageWindow(records, start, end);
   return {
     basis: 'Deduplicated token_usage_record.usage; total = input_tokens + output_tokens. Cached input and reasoning output are subsets.',
     scope: 'Locally recorded current-account responses across all projects and owned subagents; current local day only.',
@@ -106,11 +119,7 @@ export function buildTokenReport(records: Records, start: number, end: number, c
       { id: 'today', ...tokenWindow(records, start, end) },
     ],
     currentThread: currentThreadId ? { threadId: currentThreadId, ...tokenWindow(records, start, end, currentThreadId) } : null,
-    byModel: [...new Set(responses.map(r => r.model))]
-      .map(model => ({ model, ...tokenWindow({ ...records,
-        turns: records.turns.filter(t => t.model === model),
-        cacheResponses: responses.filter(r => r.model === model),
-      }, start, end) })),
+    byModel: modelWindows(records, start, end),
     diagnostics: records.diagnostics,
     limitations: [
       'Counts are observed local response usage, not an account-wide bill or a full-week total. Missing usage is unavailable, not zero.',

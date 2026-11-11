@@ -124,12 +124,22 @@ async function syncSpeed() {
   }
 }
 
-function quotaCard(row: AccountReport['windows'][number]) {
+function quotaCard(row: AccountReport['windows'][number], account: AccountReport) {
   const filled = row.remainingPercent === null ? 0 : Math.round(row.remainingPercent / 100 * 24);
-  return `<article class="quota-card ${row.remainingPercent !== null && row.remainingPercent < 20 ? 'low' : ''}"><div class="card-label">${escape(quotaName(row))}<span>REMAINING</span></div>
+  const isFable = row.scoped && row.model !== null && /fable/i.test(row.model);
+  const weekly = account.windows.find(item => !item.scoped && item.minutes === 10080);
+  const weeklyRem = weekly?.remainingPercent ?? null;
+  const blocked = isFable && (row.remainingPercent ?? 0) > 0 && weeklyRem !== null && weeklyRem <= 0;
+  const capped = isFable && (row.remainingPercent ?? 0) > 0 && weeklyRem !== null && weeklyRem > 0 && weeklyRem < (row.remainingPercent ?? 0);
+  const state = `${row.remainingPercent !== null && row.remainingPercent <= 0 ? ' exhausted' : row.remainingPercent !== null && row.remainingPercent < 15 ? ' low' : ''}${isFable ? ' is-fable' : ''}${blocked ? ' is-capped' : ''}`;
+  const share = row.weeklyShare?.usedPercent != null && row.weeklyShare?.allowancePercent != null
+    ? ` · 占周额 <b>${percent(row.weeklyShare.usedPercent)}/${percent(row.weeklyShare.allowancePercent)}</b>` : '';
+  const capNote = blocked ? ' · <span class="status-capped">受周总额限制 (0%)</span>'
+    : capped ? ` · <span class="status-capped">可用上限 ${percent(weeklyRem)}</span>` : '';
+  return `<article class="quota-card${state}"><div class="card-label">${escape(quotaName(row))}<span>${row.scoped ? 'MODEL LIMIT' : 'REMAINING'}</span></div>
     <div class="quota-number">${percent(row.remainingPercent)}<span>剩余</span></div>
     <div class="pixel-meter" role="img" aria-label="剩余 ${percent(row.remainingPercent)}">${Array.from({ length: 24 }, (_, i) => `<i class="${i < filled ? 'filled' : ''}"></i>`).join('')}</div>
-    <div class="quota-bottom"><span>已用 <b>${percent(row.usedPercent)}</b></span><span>重置 ${time(row.resetsAt)}</span></div></article>`;
+    <div class="quota-bottom"><span>重置 ${time(row.resetsAt)}</span><span>已用 <b>${percent(row.usedPercent)}</b>${row.cycle?.totalTokens != null ? ` · 周期 <b>${tokens(row.cycle.totalTokens)}</b>` : ''}${share}${capNote}</span></div></article>`;
 }
 
 function billingCards(account: AccountReport) {
@@ -145,7 +155,8 @@ function billingCards(account: AccountReport) {
 function modelTable(account: AccountReport) {
   const missingModel = account.provider === 'Gemini' && account.samples.some(row => row.totalTokens !== null)
     ? '日志未提供模型归属，总量见上方遥测' : '暂无有效 token 记录';
-  return `<section class="panel" id="model-consumption"><div class="panel-title"><h2>模型消耗</h2><span>LAST 24H / RECORDED</span></div><div class="table-scroll"><table><thead><tr><th>模型</th><th>输入</th><th>缓存输入</th><th>输出</th><th>思考</th><th>总 token</th></tr></thead><tbody>${account.models.length ? account.models.map(row => `<tr><td><span class="model-dot"></span>${escape(row.model)}${coverageBadge(row.status)}</td><td>${tokens(row.inputTokens)}</td><td>${tokens(row.cachedInputTokens)}</td><td>${tokens(row.outputTokens)}</td><td>${tokens(row.reasoningOutputTokens)}</td><td class="accent">${tokens(row.totalTokens)}</td></tr>`).join('') : `<tr><td colspan="6" class="empty">${missingModel}</td></tr>`}</tbody></table></div></section>`;
+  const sorted = [...account.models].sort((a, b) => (b.totalTokens ?? -1) - (a.totalTokens ?? -1));
+  return `<section class="panel" id="model-consumption"><div class="panel-title"><h2>模型消耗</h2><span>LAST 24H / RECORDED</span></div><div class="table-scroll"><table><thead><tr><th>模型</th><th>输入</th><th>缓存读</th><th>缓存写</th><th>输出</th><th>思考</th><th>总 token</th></tr></thead><tbody>${sorted.length ? sorted.map(row => `<tr${row.model && /fable/i.test(row.model) ? ' class="is-fable-row"' : ''}><td><span class="model-dot"></span>${escape(row.model)}${row.model && /fable/i.test(row.model) ? '<span class="model-tag">Fable 5</span>' : ''}${coverageBadge(row.status)}</td><td>${tokens(row.inputTokens)}</td><td>${tokens(row.cachedInputTokens)}</td><td>${tokens(row.cacheCreationInputTokens)}</td><td>${tokens(row.outputTokens)}</td><td>${tokens(row.reasoningOutputTokens)}</td><td class="accent">${tokens(row.totalTokens)}</td></tr>`).join('') : `<tr><td colspan="7" class="empty">${missingModel}</td></tr>`}</tbody></table></div></section>`;
 }
 
 let navCollapsed = preference('token-sidenav') === 'collapsed';
@@ -251,13 +262,13 @@ initSideNav();
 
 function renderAccount(account: AccountReport) {
   const openDetails = [...document.querySelectorAll<HTMLDetailsElement>('#content details[open]')].map(row => row.id);
-  const cards = account.windows.length ? [...account.windows].sort((a, b) => quotaOrder(a) - quotaOrder(b)).map(quotaCard).join('')
+  const cards = account.windows.length ? [...account.windows].sort((a, b) => quotaOrder(a) - quotaOrder(b)).map(row => quotaCard(row, account)).join('')
     : account.billing ? billingCards(account)
     : `<article class="quota-card empty">${account.provider === 'Gemini' ? `${escape(account.plan)} 订阅 · 暂未提供额度读数` : '暂无服务端额度读数'}</article>`;
   element('content').innerHTML = `${account.issue ? `<div class="notice">! ${escape(account.issue)}。本机 token 记录单独显示。</div>` : ''}${account.quotaSource === 'cached' ? `<div class="notice">本次额度未获取，显示截至 ${time(account.quotaObservedAt)} 的读数，到重置时间后清除。</div>` : ''}
     <div class="section-heading"><span>02 / 账号详情</span><span>${escape(account.label)} · ${escape(account.fingerprint ?? '指纹不可用')}</span></div>
     <div class="quota-grid" data-provider="${account.provider}">${cards}</div>
-    ${telemetry(account, windowId, cycleName)}${account.provider === 'Gemini' ? '<p class="table-note">用量来自本机 Antigravity 记录，按响应记录的通道拆分订阅（ag1 · ultra）与 Vertex AI（ag2 · vertex）。未记录模型或思考拆分时显示「—」。</p>' : ''}
+    ${telemetry(account, windowId, cycleName, Date.now(), snapshot?.accounts)}${account.provider === 'Gemini' ? '<p class="table-note">用量来自本机 Antigravity 记录，按响应记录的通道拆分订阅（ag1 · ultra）与 Vertex AI（ag2 · vertex）。未记录模型或思考拆分时显示「—」。</p>' : ''}
     ${comparison(account, speedSnapshot)}${modelTable(account)}${cycles(account)}${forecast(account)}
     <details class="notes" id="reading-notes"><summary>读数说明 <span>+</span></summary><p>额度来自服务端。token 来自本机记录，不含其他设备。账号额度保持独立。</p><p>缓存输入已包含在输入中。推理 token 已包含在输出中。缺失数据显示为「—」。</p><p>消耗速度表示工作负载消耗，不是模型输出速度。最近 24 小时从读数时间向前计算。时间按新加坡时间显示。</p>${account.provider === 'Claude' ? '<p>Claude 记录按本地账号目录归属。切换登录可能影响历史记录归属。</p>' : ''}<p>${escape(account.forecast ?? '剩余开发时间暂无可靠估计。')}</p></details>`;
   openDetails.forEach(id => { const details = document.getElementById(id) as HTMLDetailsElement | null; if (details) details.open = true; });

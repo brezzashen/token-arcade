@@ -94,3 +94,16 @@ test('initial backfill progress has a hard deadline', async () => {
   try { await waitFor(() => events.some(message => message.includes('heartbeat timed out'))); }
   finally { stop(); }
 });
+
+test('a collector that reports its own stalled poll loop is restarted and the stalled step is logged', async () => {
+  let readings = 0;
+  const events: string[] = [];
+  const stalled = 'JSON.stringify({ type: "stalled", stage: "poll/flush:save", observedAt: new Date().toISOString() })';
+  const stop = superviseSpeed(process.execPath, ['-e', `console.log(${snapshot}); console.log(${stalled}); setInterval(()=>{},1000)`],
+    () => readings++, () => {}, { ...options, staleMs: 60_000, log: message => events.push(message) });
+  try {
+    await waitFor(() => readings >= 2);
+    assert.ok(events.some(message => message.includes('stalled at poll/flush:save')));
+    assert.ok(!events.some(message => message.includes('heartbeat timed out')));
+  } finally { stop(); }
+});

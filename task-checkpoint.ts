@@ -24,6 +24,10 @@ export async function stamp(path: string, offset: number): Promise<FileStamp> {
 }
 export async function matches(path: string, offset: number, previous: FileStamp): Promise<boolean> {
   try {
+    const info = await stat(path);
+    if (info.dev !== previous.dev || info.ino !== previous.ino || info.size < offset
+      || (info.size === previous.size && info.mtimeMs !== previous.mtimeMs)) return false;
+    if (info.size === previous.size && info.mtimeMs === previous.mtimeMs && info.mtimeMs < Date.now() - 5000) return true;
     const current = await stamp(path, offset);
     return current.dev === previous.dev && current.ino === previous.ino && current.size >= offset
       && !(current.size === previous.size && current.mtimeMs !== previous.mtimeMs)

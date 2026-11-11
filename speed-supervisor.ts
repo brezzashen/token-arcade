@@ -33,6 +33,12 @@ export function superviseSpeed(command: string, args: string[], onReading: (read
         if (!Number.isFinite(at) || Math.abs(Date.now() - at) > staleMs) return;
         // Progress may extend initial backfill; after it, progress proves a live event loop whose polls a saturated host
         // slows, so it extends staleness only up to busyMs past the last complete snapshot.
+        if (reading.type === 'stalled') {
+          const stage = typeof reading.stage === 'string' && /^[a-z:\/-]{1,60}$/.test(reading.stage) ? reading.stage : 'unknown';
+          log(`Speed collector poll loop stalled at ${stage}; restarting.`);
+          terminate();
+          return;
+        }
         if (reading.type === 'progress') {
           deadline = published ? Math.min(snapshotAt + busyMs, Date.now() + staleMs)
             : Math.min(startupDeadline, Date.now() + Math.max(startupMs, staleMs));

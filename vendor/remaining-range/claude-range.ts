@@ -1,6 +1,6 @@
 /** Builds a passive Claude quota/token report for range.ts from current-profile OAuth and all local response transcripts. A quota failure preserves token data; no historical percentage delta or model budget is invented. Every window with a reset time also carries `cycleTokens`, the cumulative consumption since that window last reset (resetsAt minus its duration, to capture), because its used percentage is then a measured delta from zero; a model-scoped window counts only matching model IDs. claude-records.test.ts exercises local coverage, the cycle intervals and failure independence. */
 import { createHash } from 'node:crypto';
-import { readClaudeAccountId } from './claude-records.ts';
+import { readClaudeAccountId, readGeminiProfileId } from './claude-records.ts';
 import { fetchClaudeQuota } from './claude-quota.ts';
 import { readClaudeUsageRecords } from './claude-usage-records.ts';
 import { dayStart } from './records.ts';
@@ -50,11 +50,11 @@ export async function buildClaudeRange(configDir: string, timezone: string,
 
 export async function buildGeminiRange(configDir: string, timezone: string, now = Date.now()) {
   let identity: string | null = null;
-  try { identity = readClaudeAccountId(configDir); }
+  try { identity = readGeminiProfileId(configDir); }
   catch { /* Local tokens remain readable without a stored profile ID. */ }
   const end = now, start = dayStart(end, timezone);
   const records = await readClaudeUsageRecords(configDir, start, end);
-  if (identity !== null && readClaudeAccountId(configDir) !== identity) throw new Error('Gemini profile account changed during query; rerun.');
+  if (identity !== null && readGeminiProfileId(configDir) !== identity) throw new Error('Gemini profile account changed during query; rerun.');
   const tokens = { ...buildTokenReport(records, start, end),
     basis: 'Deduplicated Claude Code on Gemini assistant message usage; input = plain input + cache read + cache creation; total = input + output.',
     scope: 'All locally recorded Gemini responses in this profile today, including headless runs and subagents.',
